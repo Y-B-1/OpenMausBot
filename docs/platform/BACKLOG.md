@@ -68,27 +68,33 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (08d2a83) `managed` driver SCAFFOLD: CMA agent-per-Atrium-agent cache, session-per-turn with initial_events + $5 budget cap, event polling to idle. Live validation still blocked on ANTHROPIC_API_KEY.
 - [ ] `agent-sdk` runner: local worker executing Claude Agent SDK sessions
       for repo work; events mirrored into channels.
-- [ ] `foundry` driver (@anthropic-ai/foundry-sdk) + generic OpenAI-compat
-      driver for Grok/DeepSeek-class models. Key entry UI in Admin →
-      Providers (keys stored server-side .env, never client).
+- [x] (98908a3) `foundry` driver (AnthropicDriver over the Foundry Messages
+      endpoint) + generic OpenAI-compat driver (chat-completions loop,
+      function-calling tools, 10-turn cap) for Grok/DeepSeek-class models.
+      Key-gated factories wired into driverFor; live validation still
+      blocked on owner keys.
 - [x] (fc13a94) Provider status page (Admin → Model providers): key presence, driver gating, .env.example + loader. Model-picker constraint still open.
 
 ### E6 — type.com learnings beyond shared brain
 - [ ] Spaces as bundles: a Space = channels + connectors + skills + memory
       partition an agent inherits on entry (our `space` field, promoted).
-- [ ] Import-from-local onboarding: ingest CLAUDE.md/skills from a repo to
-      seed agent configs (we have YAML export; add import).
+- [x] (707dbc4) Import-from-local onboarding: /api/import accepts {claudeMd}
+      and seeds a mock "Repo Assistant" agent from the doc head (first 2000
+      chars as persona). Skills ingestion still open if ever needed.
 - [x] (54196b5) Self-review loop: GoalCompleted → orchestrator posts a review
       prompt; agent proposes a lesson to memory (review queue).
 - [x] (f943bdd) Doc surface: Files view (GET /api/files from FileWritten
       replay, grouped by agent).
 
 ### E7 — Demo & evidence (owner sees everything)
-- [ ] Rich seed: admin + 2 members, 2 teams, DMs, group channel, running +
-      done goals, gated pipeline, connectors (M365 connected w/ synced
-      memory, Jira disconnected), org/team/personal memory, costs.
+- [x] (76b99fc) Rich seed via `pnpm demo` (REST against a running relay,
+      idempotent): Yosri admin + Sara member, Engineering/Finance teams,
+      #product chat + pending @Dev question, DM, SharePoint org memory +
+      Confluence team memory synced, Jira agent connector, Outlook
+      disconnected, done + halted goals, gated pipeline.
 - [ ] Screenshot set per view, light+dark, committed.
-- [ ] Live walkthrough available at any time via `pnpm demo`.
+- [x] (76b99fc) Live walkthrough available at any time via `pnpm demo`
+      (requires `pnpm start` first; friendly error otherwise).
 
 ## Buzz notes (owner's questions answered — keep for reference)
 
