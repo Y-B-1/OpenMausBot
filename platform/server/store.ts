@@ -79,6 +79,7 @@ export class Projections {
     this.agents.clear();
     this.transcripts.clear();
     this.memory.clear();
+    this.memoryChannel.clear();
     this.approvals.clear();
     this.routines.clear();
     for (const ev of store.replay(org)) this.fold(ev);

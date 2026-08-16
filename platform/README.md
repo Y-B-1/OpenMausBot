@@ -10,9 +10,18 @@ behind a `SandboxProvider` seam.
 
 ```bash
 pnpm install
+pnpm -C platform seed       # populate the acme demo workspace (recommended)
 pnpm -C platform dev        # relay server on :8900
 pnpm -C platform dev:web    # web UI on :8901
 ```
+
+The seed creates a full demo: 3 channels (#general, #finance, #eng), agents
+Scout/Quill/Ledger, seeded conversations, memory across all four trust tiers
+(including one awaiting review and one quarantined injection attempt), a
+resolved and a pending approval with sandbox audit, and a scheduled routine.
+Log in as `Yosri`. Try: `Ledger, show me the Q3 revenue numbers` in #finance
+(query-plan card), approve the pending card in #eng, review the memory queue,
+and hit Run now on the Weekly eng digest routine.
 
 Open http://localhost:8901 — log in with any name, create a channel, add a
 mock agent, and talk to it: `@Scout please compute something` triggers a
