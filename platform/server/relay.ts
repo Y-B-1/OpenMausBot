@@ -26,6 +26,7 @@ import { EventKind } from "../shared/contracts.ts";
 import { EventStore, Projections } from "./store.ts";
 import { exportYaml } from "./yaml.ts";
 import { PROVIDER_CATALOG, defaultTools, providerInfo, syncItems } from "./connectors.ts";
+import { providerStatuses } from "./providers.ts";
 
 /** Tenancy seam (D4): single org, fail-closed. */
 export function resolveOrg(hostHeader: string | undefined): string {
@@ -212,6 +213,7 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
             costs: projections.costs,
             teams: [...projections.teams.values()],
             connectors: [...projections.connectors.values()],
+            providers: providerStatuses(),
             me: projections.users.get(userId) ?? null,
             transcripts: Object.fromEntries(channels.map((c) => [c.id, projections.transcripts.get(c.id) ?? []])),
           });
@@ -256,7 +258,8 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           const body = await readBody(req);
           const name = String(body["name"] ?? "").trim();
           if (!name) return json(res, 400, { error: "name required" });
-          const driver = body["driver"] === "anthropic" ? "anthropic" : "mock";
+          const rawDriver = String(body["driver"] ?? "mock");
+          const driver = (["anthropic", "foundry", "openai_compat"] as const).find((d) => d === rawDriver) ?? "mock";
           const mp = (body["modelPolicy"] ?? {}) as Partial<ModelPolicy>;
           const agentUser: User = { id: crypto.randomUUID(), name, kind: "agent" };
           const agent: AgentRecord = {

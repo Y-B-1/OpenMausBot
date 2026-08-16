@@ -1,5 +1,16 @@
 // Atrium server entrypoint.
+import fs from "node:fs";
+import path from "node:path";
 import { createRelay } from "./relay.ts";
+
+// Minimal .env loader (platform/.env) — existing env always wins.
+const envFile = path.join(import.meta.dirname, "..", ".env");
+if (fs.existsSync(envFile)) {
+  for (const line of fs.readFileSync(envFile, "utf8").split("\n")) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
+    if (m && process.env[m[1]!] === undefined) process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, "");
+  }
+}
 import { createDispatcher } from "./agents/dispatcher.ts";
 import { createEngines } from "./agents/engines.ts";
 import { createAnthropicDriver } from "./agents/anthropic.ts";

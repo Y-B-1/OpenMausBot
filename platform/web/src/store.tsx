@@ -51,6 +51,15 @@ export type SandboxEvent = {
 
 export type WsStatus = "disconnected" | "connecting" | "connected";
 
+export type ProviderStatus = {
+  id: string;
+  label: string;
+  requires: string[];
+  present: string[];
+  ready: boolean;
+  enables: string;
+};
+
 export type State = {
   token: string | null;
   me: User | null;
@@ -68,6 +77,7 @@ export type State = {
   costs: TurnCost[];
   teams: Record<string, TeamRecord>;
   connectors: Record<string, ConnectorRecord>;
+  providers: ProviderStatus[];
   feeds: Record<string, FeedItem[]>;
   pendingTurns: Record<string, PendingTurn>;
   sandboxEvents: SandboxEvent[];
@@ -93,6 +103,7 @@ export const initialState: State = {
   costs: [],
   teams: {},
   connectors: {},
+  providers: [],
   feeds: {},
   pendingTurns: {},
   sandboxEvents: [],
@@ -116,6 +127,7 @@ export type StateSnapshot = {
   costs?: TurnCost[];
   teams?: TeamRecord[];
   connectors?: ConnectorRecord[];
+  providers?: ProviderStatus[];
   me?: User | null;
   transcripts: Record<
     string,
@@ -417,6 +429,7 @@ export function reducer(state: State, action: Action): State {
         pipelines,
         teams,
         connectors,
+        providers: action.snap.providers ?? [],
         me: action.snap.me ?? state.me,
         costs: action.snap.costs ?? [],
         feeds,

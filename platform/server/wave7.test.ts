@@ -185,6 +185,32 @@ describe("memory search with team walls (E4)", () => {
   });
 });
 
+describe("providers (E5)", () => {
+  it("reports readiness from env; driver gating follows", async () => {
+    const { providerStatuses, driverReady } = await import("./providers.ts");
+    const empty = providerStatuses({} as NodeJS.ProcessEnv);
+    expect(empty.every((p) => !p.ready)).toBe(true);
+    expect(driverReady("mock", empty)).toBe(true);
+    expect(driverReady("anthropic", empty)).toBe(false);
+    const withKeys = providerStatuses({
+      ANTHROPIC_API_KEY: "sk-test",
+      FOUNDRY_API_KEY: "fk",
+    } as unknown as NodeJS.ProcessEnv);
+    expect(withKeys.find((p) => p.id === "anthropic")!.ready).toBe(true);
+    expect(withKeys.find((p) => p.id === "foundry")!.ready).toBe(false); // missing FOUNDRY_RESOURCE
+    expect(driverReady("anthropic", withKeys)).toBe(true);
+  });
+
+  it("agent creation accepts the new driver values", async () => {
+    const { relay, base } = await boot();
+    const admin = await login(base, "Yosri");
+    const { data } = await post(base, admin.token, "/api/agents", { name: "Fx", driver: "foundry" });
+    const agent = data["agent"] as { id: string; driver: string };
+    expect(agent.driver).toBe("foundry");
+    expect(relay.projections.agents.get(agent.id)!.driver).toBe("foundry");
+  });
+});
+
 describe("DMs (E1)", () => {
   it("find-or-create returns the same 1:1 channel on repeat calls", async () => {
     const { base } = await boot();

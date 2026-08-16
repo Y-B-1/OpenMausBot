@@ -732,7 +732,7 @@ function MemoryView() {
 function AdminView() {
   const { state } = useStore();
   const notice = useNotice();
-  const [tab, setTab] = useState<"people" | "connectors">("people");
+  const [tab, setTab] = useState<"people" | "connectors" | "providers">("people");
   const [teamName, setTeamName] = useState("");
   const [provider, setProvider] = useState("sharepoint");
   const [kind, setKind] = useState<"memory" | "agent">("memory");
@@ -755,7 +755,35 @@ function AdminView() {
       <div className="tab-row">
         <button className={`btn btn-option ${tab === "people" ? "tab-active" : ""}`} onClick={() => setTab("people")}>People &amp; Teams</button>
         <button className={`btn btn-option ${tab === "connectors" ? "tab-active" : ""}`} onClick={() => setTab("connectors")}>Connectors</button>
+        <button className={`btn btn-option ${tab === "providers" ? "tab-active" : ""}`} onClick={() => setTab("providers")}>Model providers</button>
       </div>
+
+      {tab === "providers" && (
+        <>
+          {state.providers.map((p) => (
+            <div key={p.id} className="card" data-testid="provider-card">
+              <div className="card-head">
+                <span className="goal-name">{p.label}</span>
+                <span className={`chip ${p.ready ? "chip-done" : "chip-status-halted"}`}>{p.ready ? "key present — live" : "key missing"}</span>
+              </div>
+              <div className="card-text">{p.enables}</div>
+              <div className="card-foot mono">
+                {p.requires.map((r) => (
+                  <span key={r} className={`chip ${p.present.includes(r) ? "chip-done" : ""}`} style={{ marginRight: 6 }}>
+                    {r} {p.present.includes(r) ? "✓" : "· not set"}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="empty-state">
+            <p>
+              To add a key: put the variable in <code className="mono">platform/.env</code> (or the server shell) and restart the
+              server. Keys never reach the browser — this page only shows which names are set.
+            </p>
+          </div>
+        </>
+      )}
 
       {tab === "people" && (
         <>
