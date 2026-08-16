@@ -149,4 +149,37 @@ describe("relay", () => {
     expect(relay2.projections.transcripts.get(channel.id)!.map((t) => t.text)).toEqual(["persisted"]);
     expect(relay2.projections.channels.get(channel.id)!.name).toBe("general");
   });
+
+  it("fans memory review outcomes out to the proposal's channel", async () => {
+    const { relay, base, port } = await boot();
+    const alice = await login(base, "alice");
+    const chRes = await post(base, alice.token, "/api/channels", { name: "general", space: "hq" });
+    const { channel } = (await chRes.json()) as { channel: { id: string } };
+
+    relay.emitEvent(alice.user.id, {
+      kind: 40,
+      entry: {
+        id: "m1",
+        scope: "space",
+        kind: "fact",
+        content: "launch is in October",
+        provenance: { author: alice.user.id, sessionRef: "s1" },
+        trustTier: "agent_proposed",
+        status: "active",
+        ts: Date.now(),
+      },
+    } as never, channel.id);
+
+    const ws = await connect(port, alice.token);
+    ws.send(JSON.stringify({ subscribe: channel.id }));
+    expect(await nextMessage(ws)).toEqual({ subscribed: channel.id });
+
+    const received: unknown[] = [];
+    ws.on("message", (d) => received.push(JSON.parse(String(d))));
+    await post(base, alice.token, "/api/memory/m1/review", { accept: true });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const kinds = received.map((m) => (m as { event: { kind: number } }).event.kind);
+    expect(kinds).toContain(41);
+  });
 });

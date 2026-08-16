@@ -237,7 +237,7 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           const evBody: EventBody = accept
             ? { kind: EventKind.MemoryAccepted, entryId: entry.id, by: userId }
             : { kind: EventKind.MemoryRejected, entryId: entry.id, by: userId };
-          emit(newEvent(org, userId, evBody));
+          emit(newEvent(org, userId, evBody, projections.memoryChannel.get(entry.id)));
           return json(res, 200, { ok: true, accepted: accept });
         }
 

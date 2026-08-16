@@ -64,6 +64,8 @@ export class Projections {
   agents = new Map<string, AgentRecord>();
   transcripts = new Map<string, TranscriptItem[]>();
   memory = new Map<string, MemoryEntry>();
+  /** Channel a memory entry was proposed in, so review outcomes can fan out there. */
+  memoryChannel = new Map<string, string>();
   approvals = new Map<string, Approval>();
 
   rebuild(store: EventStore, org: string): void {
@@ -114,6 +116,7 @@ export class Projections {
       case EventKind.MemoryProposed: {
         const entry = { ...body.entry };
         this.memory.set(entry.id, entry);
+        if (ev.channelId) this.memoryChannel.set(entry.id, ev.channelId);
         // Supersede-not-delete: the prior version stays, marked superseded.
         if (entry.supersedes) {
           const prev = this.memory.get(entry.supersedes);

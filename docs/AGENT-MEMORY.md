@@ -12,9 +12,14 @@ Research COMPLETE: 10 briefings in `docs/platform/research/`, all red-teamed
 in place). Synthesis in `docs/platform/VISION.md` (working name: Atrium);
 presentation artifact published (URL in VISION.md). Buzz cloned read-only at
 `/workspace/block/buzz`; charge skills at `~/.claude/skills`.
-NEXT: charge:design spec (needs owner alignment interview) → charge:plan →
-web prototype (thin slice: multi-tenant relay, channels, 2–3 live agents,
-tiered memory + review queue, one sandboxed computer, approvals).
+PROTOTYPE SHIPPED (batch 3, owner-authorized autonomous run): `platform/`
+workspace — event-log relay (WS scoped fan-out, fail-closed tenancy seam),
+agent drivers (mock + anthropic), per-channel dispatcher, tiered memory with
+review queue + quarantine gates, LocalSandbox with approvals + audit, React
+web UI. 21 tests green; e2e screenshot evidence `platform/web/screenshot.png`.
+Design/plan: docs/platform/DESIGN.md, PLAN.md (decisions logged as D1–D12).
+NEXT: owner feedback on prototype → widen slices (real E2B SandboxProvider,
+multi-org, SSO wrap, plan-then-execute stub, Composio connectors).
 Branch: `claude/hybrid-ai-platform-planning-upe28l` (all work lands here).
 
 ## Baselines
