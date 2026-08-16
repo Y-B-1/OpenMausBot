@@ -1,0 +1,16 @@
+{
+  "name": "Atrium",
+  "short_name": "Atrium",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#3b4fd9",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%233b4fd9'/%3E%3Ctext x='256' y='348' font-family='Georgia,serif' font-size='288' fill='%23f4f6fb' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

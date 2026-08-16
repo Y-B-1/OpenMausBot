@@ -658,3 +658,6 @@ textarea { resize: vertical; }
 }
 .chat-promote { margin-left: auto; }
 .btn-open-room { font-size: 12px; padding: 4px 10px; }
+
+/* PWA-lite: inbox notification opt-in */
+.notify-enable { align-self: flex-start; margin-bottom: 4px; }

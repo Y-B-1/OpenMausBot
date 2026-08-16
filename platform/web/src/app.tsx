@@ -16,7 +16,7 @@ import type {
   TemplateRecord,
   User,
 } from "../../shared/contracts.ts";
-import { api, useStore, type FeedItem, type PendingTurn, type StateSnapshot } from "./store.tsx";
+import { api, enableNotifications, notificationsEnabled, notificationsSupported, useStore, type FeedItem, type PendingTurn, type StateSnapshot } from "./store.tsx";
 
 // ---------- Small pieces ----------
 
@@ -303,8 +303,16 @@ function InboxView({ goTo }: { goTo: (v: View) => void }) {
     }
   };
 
+  const [notifyOn, setNotifyOn] = useState(notificationsEnabled());
+  const askNotify = async () => setNotifyOn(await enableNotifications());
+
   return (
     <Page title="Inbox" sub="Agents reach you here — and only here. Reply to resume their work.">
+      {notificationsSupported() && !notifyOn && (
+        <button className="btn btn-ghost notify-enable" data-testid="notify-enable" onClick={askNotify}>
+          Enable desktop notifications
+        </button>
+      )}
       {questions.filter((q) => q.status === "pending").length === 0 && items.length === 0 && (
         <div className="empty-state">
           <div className="empty-title serif">All quiet</div>

@@ -155,6 +155,40 @@ export type Action =
   | { a: "routine-created"; routine: RoutineRecord }
   | { a: "notice"; text: string | null };
 
+// ---- PWA-lite: desktop-notification fallback (no service worker; fires only
+// while the app is open in a hidden tab). Preference lives in localStorage.
+const NOTIFY_KEY = "atrium-notify";
+
+export function notificationsSupported(): boolean {
+  return typeof Notification !== "undefined";
+}
+
+export function notificationsEnabled(): boolean {
+  return notificationsSupported() && localStorage.getItem(NOTIFY_KEY) === "on" && Notification.permission === "granted";
+}
+
+export async function enableNotifications(): Promise<boolean> {
+  if (!notificationsSupported()) return false;
+  const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  localStorage.setItem(NOTIFY_KEY, perm === "granted" ? "on" : "off");
+  return perm === "granted";
+}
+
+function maybeNotify(ev: AtriumEvent): void {
+  if (typeof document === "undefined" || !document.hidden) return;
+  if (!notificationsEnabled()) return;
+  const body = ev.body;
+  let text: string | null = null;
+  if (body.kind === EventKind.InboxPosted) text = body.item.text;
+  else if (body.kind === EventKind.QuestionAsked) text = body.question.prompt;
+  if (text === null) return;
+  try {
+    new Notification("Atrium — an agent needs you", { body: text.slice(0, 140), tag: ev.id });
+  } catch {
+    // Notification construction can throw on some platforms; never break the feed.
+  }
+}
+
 function pushFeed(feeds: Record<string, FeedItem[]>, channelId: string, item: FeedItem): Record<string, FeedItem[]> {
   const list = feeds[channelId] ?? [];
   if (list.some((i) => i.eventId === item.eventId)) return feeds;
@@ -530,7 +564,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (data["event"]) {
-          dispatch({ a: "ws-event", event: data["event"] as AtriumEvent });
+          const event = data["event"] as AtriumEvent;
+          dispatch({ a: "ws-event", event });
+          maybeNotify(event);
         } else if (typeof data["error"] === "string") {
           dispatch({ a: "notice", text: `subscription refused: ${data["error"]}` });
         }
