@@ -284,6 +284,7 @@ textarea { resize: vertical; }
 }
 
 .rail-section-title { color: var(--fg-on-rail-muted); font-size: 10.5px; letter-spacing: 0.1em; padding: 8px 10px 4px; }
+.rail-space-title { color: var(--fg-on-rail-muted); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 10px 2px 16px; opacity: 0.75; }
 .channel-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
 .channel-item {
   width: 100%;

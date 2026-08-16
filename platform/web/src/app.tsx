@@ -171,20 +171,34 @@ function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) 
       </ul>
       <div className="rail-section-title mono">CHANNELS</div>
       <ul className="channel-list">
-        {state.channels.filter((c) => c.space !== "dm").map((c) => (
-          <li key={c.id}>
-            <button
-              className={`channel-item ${state.currentChannelId === c.id && view === "channels" ? "active" : ""}`}
-              onClick={() => {
-                dispatch({ a: "select-channel", channelId: c.id });
-                setView("channels");
-              }}
-            >
-              <span className="channel-hash">#</span> {c.name}
-            </button>
-          </li>
-        ))}
-        {state.channels.length === 0 && <li className="rail-empty">No channels yet.</li>}
+        {(() => {
+          const spaces = new Map<string, Channel[]>();
+          for (const c of state.channels) {
+            if (c.space === "dm") continue;
+            spaces.set(c.space, [...(spaces.get(c.space) ?? []), c]);
+          }
+          return [...spaces.entries()].map(([space, chans]) => (
+            <li key={space}>
+              <div className="rail-space-title mono" data-space={space}>{space}</div>
+              <ul className="channel-list">
+                {chans.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      className={`channel-item ${state.currentChannelId === c.id && view === "channels" ? "active" : ""}`}
+                      onClick={() => {
+                        dispatch({ a: "select-channel", channelId: c.id });
+                        setView("channels");
+                      }}
+                    >
+                      <span className="channel-hash">#</span> {c.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ));
+        })()}
+        {state.channels.filter((c) => c.space !== "dm").length === 0 && <li className="rail-empty">No channels yet.</li>}
       </ul>
       <form className="rail-create" onSubmit={createChannel}>
         <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="New channel…" aria-label="New channel name" />
@@ -513,7 +527,7 @@ function PipelineCard({ run }: { run: PipelineRun }) {
 }
 
 function PipelinesView() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const notice = useNotice();
   const [name, setName] = useState("");
   const [steps, setSteps] = useState("Write spec | Produce a spec for the input. | gate\nImplement | Implement the spec.");
@@ -539,6 +553,10 @@ function PipelinesView() {
     if (parsed.length === 0) return;
     try {
       await api(state.token, "POST", "/api/templates", { name: name.trim(), steps: parsed });
+      // TemplateCreated carries no channelId, so it never fans out over WS —
+      // refresh the snapshot so the "start run" select sees the new template.
+      const snap = await api<StateSnapshot>(state.token, "GET", "/api/state");
+      dispatch({ a: "snapshot", snap });
       setName("");
     } catch (err) {
       notice(err);
@@ -795,10 +813,55 @@ function MemoryView() {
 
 // ---------- Admin view (E2/E3) ----------
 
+type AuditRow = { id: string; kind: number; authorId: string; ts: number; channelId?: string };
+
+const KIND_LABEL: Record<number, string> = {
+  1: "message",
+  10: "channel created",
+  11: "member added",
+  20: "agent turn started",
+  22: "agent turn completed",
+  30: "approval requested",
+  31: "approval resolved",
+  40: "memory proposed",
+  41: "memory accepted",
+  42: "memory rejected",
+  50: "sandbox exec",
+  61: "query plan executed",
+  70: "routine created",
+  71: "routine run started",
+  72: "routine run completed",
+  80: "inbox posted",
+  81: "inbox replied",
+  82: "question asked",
+  83: "question answered",
+  90: "goal created",
+  91: "goal session started",
+  92: "goal session completed",
+  93: "criterion checked",
+  94: "goal completed",
+  95: "goal halted",
+  100: "template created",
+  101: "pipeline started",
+  102: "pipeline step started",
+  103: "pipeline step completed",
+  104: "pipeline completed",
+  110: "file written",
+  111: "egress denied",
+  120: "turn cost recorded",
+  130: "team created",
+  131: "team member added",
+  132: "role changed",
+  140: "connector created",
+  141: "connector updated",
+  142: "connector synced",
+};
+
 function AdminView() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const notice = useNotice();
-  const [tab, setTab] = useState<"people" | "connectors" | "providers">("people");
+  const [tab, setTab] = useState<"people" | "connectors" | "providers" | "audit">("people");
+  const [audit, setAudit] = useState<AuditRow[]>([]);
   const [teamName, setTeamName] = useState("");
   const [provider, setProvider] = useState("sharepoint");
   const [kind, setKind] = useState<"memory" | "agent">("memory");
@@ -808,13 +871,31 @@ function AdminView() {
   const teams = Object.values(state.teams);
   const connectors = Object.values(state.connectors);
 
+  // Org-level events (roles, teams, connectors, syncs) have no channelId and
+  // never fan out over WS — refresh the snapshot on mount and after each call.
+  const refresh = async () => {
+    const snap = await api<StateSnapshot>(state.token, "GET", "/api/state");
+    dispatch({ a: "snapshot", snap });
+  };
+  useEffect(() => {
+    refresh().catch(notice);
+  }, []);
+
   const call = async (path: string, body: unknown = {}) => {
     try {
       await api(state.token, "POST", path, body);
+      await refresh();
     } catch (err) {
       notice(err);
     }
   };
+
+  useEffect(() => {
+    if (tab !== "audit") return;
+    api<{ events: AuditRow[] }>(state.token, "GET", "/api/audit")
+      .then((r) => setAudit(r.events))
+      .catch(notice);
+  }, [tab]);
 
   return (
     <Page title="Admin" sub="People, teams, and the org's connectors. Only admins see this room.">
@@ -822,7 +903,23 @@ function AdminView() {
         <button className={`btn btn-option ${tab === "people" ? "tab-active" : ""}`} onClick={() => setTab("people")}>People &amp; Teams</button>
         <button className={`btn btn-option ${tab === "connectors" ? "tab-active" : ""}`} onClick={() => setTab("connectors")}>Connectors</button>
         <button className={`btn btn-option ${tab === "providers" ? "tab-active" : ""}`} onClick={() => setTab("providers")}>Model providers</button>
+        <button className={`btn btn-option ${tab === "audit" ? "tab-active" : ""}`} onClick={() => setTab("audit")}>Audit</button>
       </div>
+
+      {tab === "audit" && (
+        <div className="card">
+          <div className="form-title mono">LAST {audit.length} EVENTS</div>
+          {audit.length === 0 && <div className="panel-empty">No events yet.</div>}
+          {[...audit].reverse().map((e) => (
+            <div key={e.id} className="admin-row" data-testid="audit-row">
+              <span className="chip mono">{e.kind}</span>
+              <span className="roster-name">{KIND_LABEL[e.kind] ?? "event"}</span>
+              <span className="card-actor">{state.roster[e.authorId]?.name ?? e.authorId}</span>
+              <span className="card-ts mono">{new Date(e.ts).toLocaleTimeString()}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {tab === "providers" && (
         <>

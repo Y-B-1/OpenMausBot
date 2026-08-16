@@ -715,6 +715,19 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           return json(res, 200, { imported: created });
         }
 
+        // GET /api/audit — admin-only: last 100 events, metadata only (no bodies).
+        if (method === "GET" && url.pathname === "/api/audit") {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const events = [...store.replay(org)].slice(-100).map((e) => ({
+            id: e.id,
+            kind: e.kind,
+            authorId: e.authorId,
+            ts: e.ts,
+            ...(e.channelId !== undefined ? { channelId: e.channelId } : {}),
+          }));
+          return json(res, 200, { events });
+        }
+
         // GET /api/export — YAML of the org's operating config (W6-E)
         if (method === "GET" && url.pathname === "/api/export") {
           res.writeHead(200, { "content-type": "text/yaml" });

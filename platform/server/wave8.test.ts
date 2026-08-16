@@ -134,6 +134,35 @@ describe("import (W8)", () => {
     expect(templateB.steps.every((s) => s.agentId === agentB.id)).toBe(true);
   });
 
+  it("audit: admin gets last events in append order, metadata only", async () => {
+    const { base } = await boot();
+    const admin = await login(base, "Yosri");
+    await post(base, admin.token, "/api/channels", { name: "general", space: "general" });
+    const res = await get(base, admin.token, "/api/audit");
+    expect(res.status).toBe(200);
+    const { events } = JSON.parse(res.text) as { events: Array<Record<string, unknown>> };
+    expect(events.length).toBeGreaterThanOrEqual(2); // MemberAdded (login) + ChannelCreated
+    // Append order: timestamps never decrease.
+    for (let i = 1; i < events.length; i++) {
+      expect(events[i]!["ts"] as number).toBeGreaterThanOrEqual(events[i - 1]![`ts`] as number);
+    }
+    expect(events.at(-1)!["kind"]).toBe(10); // ChannelCreated is the newest
+    // No payload leakage: metadata keys only.
+    for (const e of events) {
+      expect(Object.keys(e).sort()).toEqual(
+        ["authorId", ...(e["channelId"] !== undefined ? ["channelId"] : []), "id", "kind", "ts"].sort(),
+      );
+    }
+  });
+
+  it("audit is admin-only: member gets 403", async () => {
+    const { base } = await boot();
+    await login(base, "Yosri"); // first human becomes admin
+    const member = await login(base, "Sara");
+    const res = await get(base, member.token, "/api/audit");
+    expect(res.status).toBe(403);
+  });
+
   it("import is admin-only: non-admin gets 403", async () => {
     const { base } = await boot();
     await login(base, "Yosri"); // first human becomes admin
