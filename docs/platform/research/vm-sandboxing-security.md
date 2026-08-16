@@ -30,7 +30,7 @@ Key points from primary/industry sources:
 | **E2B** | Firecracker; open-source stack, self-hostable | ~150 ms | ~$0.05/vCPU-hr + $0.016/GiB-hr, billed per second; Pro $150/mo (≈$0.17/hr for 2vCPU/4GiB) | 24 h max sandbox life; persistence via pause/snapshot; SDKs for Python/JS; the default "agent sandbox" choice |
 | **Modal** | Own gVisor-based runtime (`Sandbox` API) | 2–4 s CPU; strong for GPU | Pay only while running; idle = $0; GPUs in-sandbox | Python-native serverless; best when agents need GPU or bursty batch |
 | **Fly Machines** | Firecracker VMs, raw primitive + REST API | ~2.8 s p50 create (faster on stopped-machine start) | VM-shaped pricing per size, per second | You build the sandbox layer yourself; global regions; good "own control plane without owning metal" middle ground |
-| **Daytona** | MicroVM-based agent runtime | ~90 ms (fastest in 2026 benchmarks) | Similar per-resource metering to E2B | Declarative images, stateful workspaces, self-host option |
+| **Daytona** | **Docker/OCI containers by default** (Kata/Sysbox optional add-ons) — RED-TEAM corrected: NOT microVM-based | ~90 ms (fastest in 2026 benchmarks — because it skips the VM boundary) | Similar per-resource metering to E2B | Declarative images, stateful workspaces, self-host option. Weakest default isolation of the named providers — not an E2B substitute for untrusted code |
 | **Morph Cloud** | MicroVMs with **VM state branching** (Infinibranch) | ~250 ms incl. full memory-state branch | Usage-based | Unique: fork a running VM (agent tree search / checkpoint-rollback) |
 
 ---

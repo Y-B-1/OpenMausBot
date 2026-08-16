@@ -76,7 +76,7 @@ Add ~15–30% VRAM headroom for KV cache; KV cache, not weights, is the binding 
 ### 2.3 Managed private cloud — the middle path for a financial firm
 For data-residency-sensitive enterprises, the pragmatic answer is usually **frontier models through a hyperscaler's private endpoint**, not GPUs:
 
-- **AWS Bedrock** — partner-operated Claude, plus Llama/Mistral; **the only provider with guaranteed EU data residency for Claude (EU Inference Profile)**; PrivateLink, CloudTrail audit, no training on your data. The default for regulated FS.
+- **AWS Bedrock** — partner-operated Claude, plus Llama/Mistral; guaranteed EU data residency for Claude via EU Inference Profiles; PrivateLink, CloudTrail audit, no training on your data. The default for regulated FS. (RED-TEAM corrected: EU residency for Claude is **hyperscaler-only — Bedrock EU profiles OR Vertex AI EU regions such as europe-west3** — never the first-party API or Foundry.)
 - **Claude Platform on AWS** — Anthropic-operated with same-day API parity, SigV4/IAM auth, Marketplace billing. Best of both when you want the full Anthropic feature surface with AWS-native controls.
 - **Azure OpenAI / Microsoft Foundry** — GPT-5.x with Azure tenancy, plus Claude GA on Foundry — but **no EU data zone for Claude on Foundry yet** ("coming 2026"); EU FS firms can't use it for personal data today.
 - **GCP Vertex AI** — Claude, Gemini, and open models with CMEK, VPC-SC, EU regions. Note Anthropic feature gaps on Bedrock/Vertex: no Batches, Files API, code execution, web fetch, or Managed Agents — feature-sensitive traffic may need the first-party API.

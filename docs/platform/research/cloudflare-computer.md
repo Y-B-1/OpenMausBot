@@ -16,7 +16,7 @@ Distinguish it from two GA'd products:
   1. **Container backend** — a Cloudflare Container runs `computerd`, exposing the workspace as a **FUSE mount**, syncing bidirectionally with the DO over capnweb RPC. Full Linux userland. The container's VFS is process-lifetime in-memory; only the DO SQLite is durable. The DO is the WebSocket *server*; the container dials back (designed for future WS hibernation).
   2. **Isolate shell backend** — `just-bash` in a Dynamic Worker (V8 isolate) hitting the workspace over Workers RPC — no sync step.
   3. **Isolate JS backend** — ES modules in fresh Dynamic Workers with workspace-backed `node:fs/promises` and trusted `ws:git` / `ws:artifacts` modules.
-- **Isolation: V8 isolates + Cloudflare Containers. Not Firecracker, not gVisor.** Most agent work runs in isolates; a real kernel is rented only when needed. E2B/Vercel use Firecracker microVMs, Modal uses gVisor — Cloudflare's container isolation lacks hardware-level kernel separation, which matters for hostile-multi-tenant threat models.
+- **Isolation: V8 isolates + Cloudflare Containers.** Most agent work runs in isolates; a real kernel is rented only when needed. (RED-TEAM corrected: Cloudflare's own docs state each container instance runs in **its own dedicated VM** — hardware-virtualized, hypervisor undisclosed. The original "lacks hardware-level kernel separation" claim is not supportable; the E2B-vs-Cloudflare security gap is narrower than first assessed.)
 - **Performance** (docs/19): FUSE **beats ext4 on metadata-heavy work** (git init+commit 459 ms vs 635 ms) but **badly trails bulk sequential I/O** (64 MiB write ~17× slower, reads ~30×, copies ~40×); `npm install` ~2× slower (124.7 s vs 63.9 s).
 
 ## 3. Capabilities
