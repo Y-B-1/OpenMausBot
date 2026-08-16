@@ -99,8 +99,9 @@ export class Projections {
         this.pushTranscript(ev, "chip", `turn ${body.turnId} started`);
         break;
       case EventKind.AgentTurnCompleted:
+        // Wave 2: the final text arrives as its own kind-1 message from the
+        // dispatcher; projecting it here too would duplicate it.
         this.pushTranscript(ev, "chip", `turn ${body.turnId} completed`);
-        this.pushTranscript(ev, "message", body.text);
         break;
       case EventKind.ApprovalRequested:
         this.approvals.set(body.approval.id, { ...body.approval });

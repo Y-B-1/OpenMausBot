@@ -25,8 +25,13 @@ export function resolveOrg(hostHeader: string | undefined): string {
 /** Side-effect hook registry — Wave 2 plugs the agent dispatcher in here. */
 export type EventHook = (event: AtriumEvent) => void;
 const eventHooks: EventHook[] = [];
-export function onEvent(hook: EventHook): void {
+/** Register a hook; returns an unsubscribe function (additive Wave 2 change). */
+export function onEvent(hook: EventHook): () => void {
   eventHooks.push(hook);
+  return () => {
+    const i = eventHooks.indexOf(hook);
+    if (i >= 0) eventHooks.splice(i, 1);
+  };
 }
 // No-op registration point (kept so the pipeline stage is exercised from day one).
 onEvent(() => {});
@@ -41,6 +46,8 @@ export type Relay = {
   close: () => Promise<void>;
   store: EventStore;
   projections: Projections;
+  /** Inject an event through the full pipeline (append → fan-out → fold → hooks). Wave 2 seam. */
+  emitEvent: (authorId: string, body: EventBody, channelId?: string, opts?: { ephemeral?: boolean }) => AtriumEvent;
 };
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -302,5 +309,11 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
       server.close(() => resolve());
     });
 
-  return { server, listen, close, store, projections };
+  const emitEvent = (authorId: string, body: EventBody, channelId?: string, opts: { ephemeral?: boolean } = {}): AtriumEvent => {
+    const ev = newEvent("acme", authorId, body, channelId);
+    emit(ev, opts);
+    return ev;
+  };
+
+  return { server, listen, close, store, projections, emitEvent };
 }
