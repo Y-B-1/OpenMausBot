@@ -1,3 +1,6 @@
+packages:
+  - "."
+  - "platform"
 # pnpm 11 reads allowBuilds, pnpm 10 reads onlyBuiltDependencies — keep both
 # so either version runs the postinstalls this project actually needs.
 allowBuilds:
