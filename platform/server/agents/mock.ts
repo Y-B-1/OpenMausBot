@@ -47,6 +47,46 @@ export class MockDriver implements AgentDriver {
       return { text };
     }
 
+    // W6-A: inbox + blocking questions.
+    if (/notify me|send.*inbox/i.test(lastText)) {
+      const result = await callbacks.onToolCall("inbox_send", { text: `Status: working on "${lastText}"` });
+      const text = result.ok ? "Posted a status update to your inbox." : `Inbox send failed: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+    if (/ask me|which option/i.test(lastText)) {
+      const result = await callbacks.onToolCall("ask_user", {
+        prompt: "Which option should I take?",
+        options: ["Option A", "Option B"],
+      });
+      const text = result.ok ? `You chose: ${result.output}. Proceeding.` : `Question failed: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+
+    // W6-D: egress + files.
+    const fetchMatch = /fetch (https?:\/\/\S+)/i.exec(lastText);
+    if (fetchMatch) {
+      const result = await callbacks.onToolCall("http_fetch", { url: fetchMatch[1] });
+      const text = result.ok ? result.output : `Fetch blocked: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+    const saveMatch = /save file (\S+)\s*[:]?\s*(.*)/i.exec(lastText);
+    if (saveMatch) {
+      const result = await callbacks.onToolCall("files_write", { name: saveMatch[1], content: saveMatch[2] || "empty" });
+      const text = result.ok ? `Saved ${saveMatch[1]}.` : `File write failed: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+
+    // W6-B: goal sessions — the orchestrator asks the agent to work one criterion.
+    if (/work on criterion/i.test(lastText)) {
+      const text = /impossible/i.test(lastText) ? "BLOCKED: cannot satisfy this criterion." : "DONE: criterion satisfied.";
+      callbacks.onDelta(text);
+      return { text };
+    }
+
     const text = `You said: "${lastText}"`;
     // Two deterministic deltas to exercise streaming fan-out.
     callbacks.onDelta("You said: ");

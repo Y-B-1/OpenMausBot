@@ -7,8 +7,14 @@ import type {
   AtriumEvent,
   Channel,
   DataRow,
+  GoalRecord,
+  InboxItem,
   MemoryEntry,
+  PipelineRun,
+  QuestionRecord,
   RoutineRecord,
+  TemplateRecord,
+  TurnCost,
   User,
 } from "../shared/contracts.ts";
 import { EventKind } from "../shared/contracts.ts";
@@ -72,6 +78,12 @@ export class Projections {
   memoryChannel = new Map<string, string>();
   approvals = new Map<string, Approval>();
   routines = new Map<string, RoutineRecord>();
+  inbox = new Map<string, InboxItem>();
+  questions = new Map<string, QuestionRecord>();
+  goals = new Map<string, GoalRecord>();
+  templates = new Map<string, TemplateRecord>();
+  pipelines = new Map<string, PipelineRun>();
+  costs: TurnCost[] = [];
 
   rebuild(store: EventStore, org: string): void {
     this.channels.clear();
@@ -82,6 +94,12 @@ export class Projections {
     this.memoryChannel.clear();
     this.approvals.clear();
     this.routines.clear();
+    this.inbox.clear();
+    this.questions.clear();
+    this.goals.clear();
+    this.templates.clear();
+    this.pipelines.clear();
+    this.costs = [];
     for (const ev of store.replay(org)) this.fold(ev);
   }
 
@@ -156,6 +174,92 @@ export class Projections {
         if (r) r.lastRunAt = body.ranAt;
         break;
       }
+      case EventKind.InboxPosted:
+        this.inbox.set(body.item.id, { ...body.item });
+        break;
+      case EventKind.InboxReplied: {
+        const item = this.inbox.get(body.itemId);
+        if (item) {
+          item.status = "replied";
+          item.reply = body.reply;
+        }
+        break;
+      }
+      case EventKind.QuestionAsked:
+        this.questions.set(body.question.id, { ...body.question, options: [...body.question.options] });
+        break;
+      case EventKind.QuestionAnswered: {
+        const q = this.questions.get(body.questionId);
+        if (q) {
+          q.status = "answered";
+          q.answer = body.answer;
+        }
+        break;
+      }
+      case EventKind.GoalCreated:
+        this.goals.set(body.goal.id, {
+          ...body.goal,
+          criteria: body.goal.criteria.map((c) => ({ ...c })),
+          guardrails: { ...body.goal.guardrails },
+        });
+        break;
+      case EventKind.GoalSessionCompleted: {
+        const g = this.goals.get(body.goalId);
+        if (g) {
+          g.sessions = body.session;
+          g.spentUsd = body.spentUsd;
+        }
+        break;
+      }
+      case EventKind.GoalCriterionChecked: {
+        const g = this.goals.get(body.goalId);
+        const c = g?.criteria.find((x) => x.id === body.criterionId);
+        if (c) c.done = true;
+        break;
+      }
+      case EventKind.GoalCompleted: {
+        const g = this.goals.get(body.goalId);
+        if (g) g.status = "done";
+        break;
+      }
+      case EventKind.GoalHalted: {
+        const g = this.goals.get(body.goalId);
+        if (g) {
+          g.status = "halted";
+          g.haltReason = body.reason;
+        }
+        break;
+      }
+      case EventKind.TemplateCreated:
+        this.templates.set(body.template.id, {
+          ...body.template,
+          steps: body.template.steps.map((s) => ({ ...s })),
+        });
+        break;
+      case EventKind.PipelineStarted:
+        this.pipelines.set(body.run.id, { ...body.run, stepStates: [...body.run.stepStates] });
+        break;
+      case EventKind.PipelineStepStarted: {
+        const run = this.pipelines.get(body.runId);
+        if (run) {
+          run.stepIndex = body.stepIndex;
+          run.stepStates[body.stepIndex] = "running";
+        }
+        break;
+      }
+      case EventKind.PipelineStepCompleted: {
+        const run = this.pipelines.get(body.runId);
+        if (run) run.stepStates[body.stepIndex] = body.gated ? "awaiting_approval" : "done";
+        break;
+      }
+      case EventKind.PipelineCompleted: {
+        const run = this.pipelines.get(body.runId);
+        if (run) run.status = "done";
+        break;
+      }
+      case EventKind.TurnCostRecorded:
+        this.costs.push({ ...body.cost });
+        break;
       default:
         break; // reactions, sandbox audit, notes: not projected yet (Wave 2+)
     }

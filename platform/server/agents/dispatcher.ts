@@ -3,7 +3,7 @@
 // Also owns tool routing: memory_propose (T8 gates) and sandbox_exec (T9
 // approvals + audit).
 import crypto from "node:crypto";
-import type { AgentRecord, Approval, Channel } from "../../shared/contracts.ts";
+import type { AgentRecord, Approval, Channel, InboxItem, QuestionRecord, TurnCost } from "../../shared/contracts.ts";
 import { EventKind } from "../../shared/contracts.ts";
 import { onEvent, type Relay } from "../relay.ts";
 import type { AgentDriver, ToolDef, ToolResult } from "./driver.ts";
@@ -47,7 +47,62 @@ export const TOOL_DEFS: ToolDef[] = [
       required: ["question"],
     },
   },
+  {
+    name: "inbox_send",
+    description: "Post a status message to the human inbox. Non-blocking.",
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+    },
+  },
+  {
+    name: "ask_user",
+    description: "Ask the human a blocking question. Pass options for multiple choice; omit for free text. Returns the answer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        options: { type: "array", items: { type: "string" } },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    name: "http_fetch",
+    description: "Fetch a URL. Only hosts on the agent's environment network allowlist are reachable.",
+    inputSchema: {
+      type: "object",
+      properties: { url: { type: "string" } },
+      required: ["url"],
+    },
+  },
+  {
+    name: "files_write",
+    description: "Write a file in the agent's scoped folder. Files can be written and read, never deleted.",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string" }, content: { type: "string" } },
+      required: ["name", "content"],
+    },
+  },
+  {
+    name: "files_read",
+    description: "Read a file from the agent's scoped folder.",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    },
+  },
 ];
+
+/** W6-E: deterministic per-turn cost estimate — chars/4 ≈ tokens, priced by model tier. */
+export function estimateTurnCost(model: string, chars: number): { estTokens: number; estUsd: number } {
+  const estTokens = Math.ceil(chars / 4);
+  const perMTok = /haiku/i.test(model) ? 4 : /sonnet/i.test(model) ? 15 : 75;
+  return { estTokens, estUsd: Number(((estTokens / 1_000_000) * perMTok).toFixed(6)) };
+}
 
 type QueueItem = { agent: AgentRecord; authorId: string; text: string };
 
@@ -87,6 +142,7 @@ export function createDispatcher(relay: Relay, options: DispatcherOptions = {}):
   const inFlight = new Set<string>();
   const drainWaiters = new Map<string, Array<() => void>>();
   const pendingApprovals = new Map<string, (approved: boolean) => void>();
+  const pendingQuestions = new Map<string, (answer: string) => void>();
 
   const resolveTargets = (channel: Channel, text: string): AgentRecord[] => {
     const agentMembers = channel.memberIds
@@ -198,6 +254,72 @@ export function createDispatcher(relay: Relay, options: DispatcherOptions = {}):
               return { ok: true, output: q.summary };
             }
             if (tool === "sandbox_exec") return runSandboxExec(agent, channelId, args);
+            if (tool === "inbox_send") {
+              const item: InboxItem = {
+                id: crypto.randomUUID(),
+                agentId: agent.id,
+                channelId,
+                text: String(args["text"] ?? ""),
+                ts: Date.now(),
+                status: "open",
+              };
+              relay.emitEvent(agent.id, { kind: EventKind.InboxPosted, item }, channelId);
+              return { ok: true, output: item.id };
+            }
+            if (tool === "ask_user") {
+              const question: QuestionRecord = {
+                id: crypto.randomUUID(),
+                agentId: agent.id,
+                channelId,
+                prompt: String(args["prompt"] ?? ""),
+                options: Array.isArray(args["options"]) ? (args["options"] as string[]).map(String) : [],
+                status: "pending",
+              };
+              const answered = new Promise<string>((resolve) => {
+                pendingQuestions.set(question.id, resolve);
+              });
+              relay.emitEvent(agent.id, { kind: EventKind.QuestionAsked, question }, channelId);
+              const answer = await answered; // BLOCK until kind-83 arrives
+              return { ok: true, output: answer };
+            }
+            if (tool === "http_fetch") {
+              const url = String(args["url"] ?? "");
+              let host = "";
+              try {
+                host = new URL(url).hostname.toLowerCase();
+              } catch {
+                return { ok: false, output: `invalid url: ${url}` };
+              }
+              const allow = agent.environment?.networkAllowlist ?? [];
+              if (!allow.some((h) => h.toLowerCase() === host)) {
+                // Fail closed: no allowlist entry, no egress — and the denial is audited.
+                relay.emitEvent(agent.id, { kind: EventKind.EgressDenied, agentId: agent.id, url }, channelId);
+                return { ok: false, output: `egress denied: ${host} is not on this agent's network allowlist` };
+              }
+              return { ok: true, output: `fetched ${url} (stub body)` };
+            }
+            if (tool === "files_write") {
+              const name = String(args["name"] ?? "");
+              const content = String(args["content"] ?? "");
+              try {
+                await sandboxes.create(agent.id).writeFile(name, content);
+                relay.emitEvent(
+                  agent.id,
+                  { kind: EventKind.FileWritten, agentId: agent.id, name, bytes: Buffer.byteLength(content) },
+                  channelId,
+                );
+                return { ok: true, output: `wrote ${name}` };
+              } catch (err) {
+                return { ok: false, output: String(err) };
+              }
+            }
+            if (tool === "files_read") {
+              try {
+                return { ok: true, output: await sandboxes.create(agent.id).readFile(String(args["name"] ?? "")) };
+              } catch (err) {
+                return { ok: false, output: String(err) };
+              }
+            }
             return { ok: false, output: `unknown tool: ${tool}` };
           },
         },
@@ -205,6 +327,11 @@ export function createDispatcher(relay: Relay, options: DispatcherOptions = {}):
       // Agent-authored message: emitted through the pipeline, but never re-dispatched.
       relay.emitEvent(agent.id, { kind: EventKind.Message, text }, channelId);
       relay.emitEvent(agent.id, { kind: EventKind.AgentTurnCompleted, turnId, text }, channelId);
+      // W6-E: deterministic cost estimate over prompt-side + reply chars.
+      const promptChars = batch.reduce((n, b) => n + b.text.length, 0) + text.length;
+      const est = estimateTurnCost(agent.modelPolicy.model, promptChars);
+      const cost: TurnCost = { turnId, agentId: agent.id, ...est };
+      relay.emitEvent(agent.id, { kind: EventKind.TurnCostRecorded, cost }, channelId);
     } catch (err) {
       relay.emitEvent(
         agent.id,
@@ -246,6 +373,14 @@ export function createDispatcher(relay: Relay, options: DispatcherOptions = {}):
       if (resolve) {
         pendingApprovals.delete(ev.body.approvalId);
         resolve(ev.body.status === "approved");
+      }
+      return;
+    }
+    if (ev.body.kind === EventKind.QuestionAnswered) {
+      const resolve = pendingQuestions.get(ev.body.questionId);
+      if (resolve) {
+        pendingQuestions.delete(ev.body.questionId);
+        resolve(ev.body.answer);
       }
       return;
     }

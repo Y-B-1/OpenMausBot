@@ -9,13 +9,19 @@ import type {
   AtriumEvent,
   Channel,
   EventBody,
+  GoalGuardrails,
+  GoalRecord,
   ModelPolicy,
+  PipelineRun,
   RoutineRecord,
   RoutineSchedule,
+  TemplateRecord,
+  TemplateStep,
   User,
 } from "../shared/contracts.ts";
 import { EventKind } from "../shared/contracts.ts";
 import { EventStore, Projections } from "./store.ts";
+import { exportYaml } from "./yaml.ts";
 
 /** Tenancy seam (D4): single org, fail-closed. */
 export function resolveOrg(hostHeader: string | undefined): string {
@@ -188,6 +194,12 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
             memory: [...projections.memory.values()],
             approvals: [...projections.approvals.values()],
             routines: [...projections.routines.values()],
+            inbox: [...projections.inbox.values()],
+            questions: [...projections.questions.values()],
+            goals: [...projections.goals.values()],
+            templates: [...projections.templates.values()],
+            pipelines: [...projections.pipelines.values()],
+            costs: projections.costs,
             transcripts: Object.fromEntries(channels.map((c) => [c.id, projections.transcripts.get(c.id) ?? []])),
           });
         }
@@ -244,8 +256,11 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
               effort: String(mp.effort ?? "low"),
               maxTokens: Number(mp.maxTokens ?? 1024),
             },
-            allowTools: [],
+            allowTools: Array.isArray(body["allowTools"]) ? (body["allowTools"] as unknown[]).map(String) : [],
           };
+          if (Array.isArray(body["networkAllowlist"])) {
+            agent.environment = { networkAllowlist: (body["networkAllowlist"] as unknown[]).map(String) };
+          }
           const channelId = typeof body["channelId"] === "string" ? (body["channelId"] as string) : undefined;
           if (channelId && !isMember(channelId, userId)) return json(res, 403, { error: "not a member" });
           emit(newEvent(org, userId, { kind: EventKind.MemberAdded, userId: agent.id, user: agentUser, agent }, channelId));
@@ -303,6 +318,132 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           if (!isMember(routine.channelId, userId)) return json(res, 403, { error: "not a member" });
           runRoutine(routine);
           return json(res, 200, { ok: true });
+        }
+
+        // ---- Wave 6 routes ----
+
+        // POST /api/inbox/:id/reply {reply}
+        if (method === "POST" && parts[0] === "api" && parts[1] === "inbox" && parts[3] === "reply" && parts.length === 4) {
+          const item = projections.inbox.get(parts[2]!);
+          if (!item) return json(res, 404, { error: "unknown inbox item" });
+          const body = await readBody(req);
+          const reply = String(body["reply"] ?? "").trim();
+          if (!reply) return json(res, 400, { error: "reply required" });
+          emit(newEvent(org, userId, { kind: EventKind.InboxReplied, itemId: item.id, reply, by: userId }, item.channelId));
+          // The reply also lands in the item's channel so the agent (and the room) sees it.
+          if (item.channelId && isMember(item.channelId, userId)) {
+            emit(newEvent(org, userId, { kind: EventKind.Message, text: reply }, item.channelId));
+          }
+          return json(res, 200, { ok: true });
+        }
+
+        // POST /api/questions/:id/answer {answer} — unblocks the agent's ask_user call
+        if (method === "POST" && parts[0] === "api" && parts[1] === "questions" && parts[3] === "answer" && parts.length === 4) {
+          const q = projections.questions.get(parts[2]!);
+          if (!q) return json(res, 404, { error: "unknown question" });
+          if (q.status !== "pending") return json(res, 409, { error: "already answered" });
+          const body = await readBody(req);
+          const answer = String(body["answer"] ?? "").trim();
+          if (!answer) return json(res, 400, { error: "answer required" });
+          if (q.options.length > 0 && !q.options.includes(answer)) {
+            return json(res, 400, { error: "answer must be one of the options" });
+          }
+          emit(newEvent(org, userId, { kind: EventKind.QuestionAnswered, questionId: q.id, answer, by: userId }, q.channelId));
+          return json(res, 200, { ok: true });
+        }
+
+        // POST /api/goals {name, spec, criteria: string[], agentId, channelId, guardrails?}
+        if (method === "POST" && url.pathname === "/api/goals") {
+          const body = await readBody(req);
+          const name = String(body["name"] ?? "").trim();
+          const spec = String(body["spec"] ?? "").trim();
+          const agentId = String(body["agentId"] ?? "");
+          const channelId = String(body["channelId"] ?? "");
+          const criteriaTexts = Array.isArray(body["criteria"]) ? (body["criteria"] as unknown[]).map(String) : [];
+          if (!name || criteriaTexts.length === 0) return json(res, 400, { error: "name and criteria required" });
+          if (!projections.agents.has(agentId)) return json(res, 404, { error: "unknown agent" });
+          if (!isMember(channelId, userId)) return json(res, 403, { error: "not a member" });
+          const rawG = (body["guardrails"] ?? {}) as Partial<GoalGuardrails>;
+          const guardrails: GoalGuardrails = {
+            maxSessions: Math.max(1, Number(rawG.maxSessions ?? 20)),
+            spendCapUsd: Number(rawG.spendCapUsd ?? 25),
+            wallClockMinutes: Math.max(1, Number(rawG.wallClockMinutes ?? 240)),
+            stuckThreshold: Math.max(1, Number(rawG.stuckThreshold ?? 3)),
+          };
+          const goal: GoalRecord = {
+            id: crypto.randomUUID(),
+            name,
+            spec,
+            criteria: criteriaTexts.map((text, i) => ({ id: `c${i + 1}`, text, done: false })),
+            guardrails,
+            status: "running",
+            sessions: 0,
+            spentUsd: 0,
+            startedAt: Date.now(),
+            agentId,
+            channelId,
+          };
+          emit(newEvent(org, userId, { kind: EventKind.GoalCreated, goal }, channelId));
+          return json(res, 200, { goal });
+        }
+
+        // POST /api/templates {name, steps: [{title, agentId, prompt, requiresApproval}]}
+        if (method === "POST" && url.pathname === "/api/templates") {
+          const body = await readBody(req);
+          const name = String(body["name"] ?? "").trim();
+          const rawSteps = Array.isArray(body["steps"]) ? (body["steps"] as Array<Record<string, unknown>>) : [];
+          if (!name || rawSteps.length === 0) return json(res, 400, { error: "name and steps required" });
+          const steps: TemplateStep[] = rawSteps.map((s) => ({
+            title: String(s["title"] ?? "step"),
+            agentId: String(s["agentId"] ?? ""),
+            prompt: String(s["prompt"] ?? ""),
+            requiresApproval: s["requiresApproval"] === true,
+          }));
+          for (const s of steps) {
+            if (!projections.agents.has(s.agentId)) return json(res, 404, { error: `unknown agent in step: ${s.title}` });
+          }
+          const template: TemplateRecord = { id: crypto.randomUUID(), name, steps };
+          emit(newEvent(org, userId, { kind: EventKind.TemplateCreated, template }));
+          return json(res, 200, { template });
+        }
+
+        // POST /api/pipelines {templateId, channelId, name?, input}
+        if (method === "POST" && url.pathname === "/api/pipelines") {
+          const body = await readBody(req);
+          const template = projections.templates.get(String(body["templateId"] ?? ""));
+          if (!template) return json(res, 404, { error: "unknown template" });
+          const channelId = String(body["channelId"] ?? "");
+          if (!isMember(channelId, userId)) return json(res, 403, { error: "not a member" });
+          const run: PipelineRun = {
+            id: crypto.randomUUID(),
+            templateId: template.id,
+            name: String(body["name"] ?? template.name),
+            channelId,
+            input: String(body["input"] ?? ""),
+            stepIndex: 0,
+            stepStates: template.steps.map(() => "pending"),
+            status: "running",
+          };
+          emit(newEvent(org, userId, { kind: EventKind.PipelineStarted, run }, channelId));
+          return json(res, 200, { run });
+        }
+
+        // POST /api/pipelines/:id/advance — human approves the gated step
+        if (method === "POST" && parts[0] === "api" && parts[1] === "pipelines" && parts[3] === "advance" && parts.length === 4) {
+          const run = projections.pipelines.get(parts[2]!);
+          if (!run) return json(res, 404, { error: "unknown pipeline run" });
+          if (!isMember(run.channelId, userId)) return json(res, 403, { error: "not a member" });
+          const idx = run.stepStates.indexOf("awaiting_approval");
+          if (idx < 0) return json(res, 409, { error: "no step awaiting approval" });
+          emit(newEvent(org, userId, { kind: EventKind.PipelineStepCompleted, runId: run.id, stepIndex: idx, gated: false }, run.channelId));
+          return json(res, 200, { ok: true });
+        }
+
+        // GET /api/export — YAML of the org's operating config (W6-E)
+        if (method === "GET" && url.pathname === "/api/export") {
+          res.writeHead(200, { "content-type": "text/yaml" });
+          res.end(exportYaml(projections));
+          return;
         }
 
         return json(res, 404, { error: "not found" });
