@@ -20,7 +20,7 @@ Update it every iteration; mark DONE with commit hashes.
 ## Epics
 
 ### E1 — Four rooms, seamless
-- [ ] DM surface: first-class "Direct messages" section (1 human + 1 agent
+- [x] (044c8d9) DM surface: first-class "Direct messages" section (1 human + 1 agent
       channels auto-created per agent); DM quality ≥ upstream OpenMausBot
       chat (port its streaming/composer polish where better).
 - [ ] Cross-room flow: promote a chat thread → goal/pipeline; goal events
@@ -29,16 +29,16 @@ Update it every iteration; mark DONE with commit hashes.
 - [ ] Task board view for goals/pipelines (todo/doing/review/done columns).
 
 ### E2 — Connectors (the owner's memory vision)
-- [ ] Connector registry: record = {provider (microsoft365, sharepoint,
+- [x] (044c8d9) Connector registry: record = {provider (microsoft365, sharepoint,
       onedrive, teams, outlook, confluence, jira, databricks, github, ...),
       kind: memory | agent, status: connected|disconnected, accessLevel:
       read_only | write_no_delete, tools: [{name, enabled}], scope: org |
       team | user}.
-- [ ] Memory connectors are READ-ONLY ingest: synced items become memory
+- [x] (044c8d9) Memory connectors are READ-ONLY ingest: synced items become memory
       entries with source=connector, trustTier=org_ratified automatically
       (systems of record need no human approval — approval queue is only for
       what AGENTS claim to have learned).
-- [ ] Agent connectors: per-tool toggles; write_no_delete enforced
+- [x] (044c8d9) Agent connectors: per-tool toggles; write_no_delete enforced
       server-side like files policy.
 - [ ] Admin UI: connect/disconnect, configure tools, assign visibility
       (which teams/users see which connector).
@@ -47,8 +47,8 @@ Update it every iteration; mark DONE with commit hashes.
       collect via /wizard when reached).
 
 ### E3 — Admin, roles, teams (single-org RBAC)
-- [ ] Roles: admin | member. First user = admin; admin can promote.
-- [ ] Teams: create teams, assign members; team-scoped visibility for
+- [x] (044c8d9) Roles: admin | member. First user = admin; admin can promote.
+- [x] (044c8d9) Teams: create teams, assign members; team-scoped visibility for
       connectors, memory (team scope), channels.
 - [ ] Org-memory partitioning: admin controls which teams see which memory
       partitions (department walls).
@@ -56,9 +56,9 @@ Update it every iteration; mark DONE with commit hashes.
       audit log browser.
 
 ### E4 — Memory, explained and segmented
-- [ ] UI segmentation: Personal / Team / Organization tabs; provenance
+- [x] (044c8d9) UI segmentation: Personal / Team / Organization tabs; provenance
       shown (agent-proposed vs connector-synced vs human-written).
-- [ ] Review queue applies ONLY to agent proposals (make this visually
+- [x] (044c8d9) Review queue applies ONLY to agent proposals (make this visually
       obvious — this confused the owner).
 - [ ] Memory search endpoint for agents (retrieval respects team walls).
 
