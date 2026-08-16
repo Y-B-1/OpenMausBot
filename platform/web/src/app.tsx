@@ -1348,10 +1348,19 @@ function Roster({ channel }: { channel: Channel }) {
           const u = state.roster[id];
           const agent = state.agents[id];
           if (!u) return null;
+          const responding =
+            u.kind === "agent" &&
+            Object.values(state.pendingTurns).some((t) => t.channelId === channel.id && t.agentId === id);
           return (
             <li key={id} className="roster-row">
               <Avatar user={u} agent={agent} />
               <span className="roster-name">{u.name}</span>
+              {u.kind === "agent" &&
+                (responding ? (
+                  <span className="presence-chip mono" data-testid="presence-chip">responding…</span>
+                ) : (
+                  <span className="presence-dot" title="idle" data-testid="presence-idle" />
+                ))}
               <span className={`badge ${u.kind === "agent" ? "badge-agent" : "badge-human"}`}>
                 {u.kind === "agent" ? "AGENT" : "HUMAN"}
               </span>
