@@ -335,3 +335,28 @@ describe("import (W8)", () => {
     expect(denied.status).toBe(403);
   });
 });
+
+describe("E5 driver factories (key-gated, no network)", () => {
+  it("foundry factory: null on empty env, non-null with both keys", async () => {
+    const { createFoundryDriver } = await import("./agents/foundry.ts");
+    expect(createFoundryDriver({})).toBeNull();
+    expect(createFoundryDriver({ FOUNDRY_API_KEY: "k" })).toBeNull();
+    expect(createFoundryDriver({ FOUNDRY_RESOURCE: "r" })).toBeNull();
+    const driver = createFoundryDriver({ FOUNDRY_API_KEY: "k", FOUNDRY_RESOURCE: "r" });
+    expect(driver).not.toBeNull();
+    expect(typeof driver!.runTurn).toBe("function");
+  });
+
+  it("openai_compat factory: null on empty env, non-null with base URL + key", async () => {
+    const { createOpenAICompatDriver } = await import("./agents/openai-compat.ts");
+    expect(createOpenAICompatDriver({})).toBeNull();
+    expect(createOpenAICompatDriver({ OPENAI_COMPAT_BASE_URL: "https://x.test/v1" })).toBeNull();
+    expect(createOpenAICompatDriver({ OPENAI_COMPAT_API_KEY: "k" })).toBeNull();
+    const driver = createOpenAICompatDriver({
+      OPENAI_COMPAT_BASE_URL: "https://x.test/v1",
+      OPENAI_COMPAT_API_KEY: "k",
+    });
+    expect(driver).not.toBeNull();
+    expect(typeof driver!.runTurn).toBe("function");
+  });
+});
