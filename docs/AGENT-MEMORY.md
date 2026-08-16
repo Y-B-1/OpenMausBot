@@ -21,6 +21,13 @@ Design/plan: docs/platform/DESIGN.md, PLAN.md (decisions logged as D1–D12).
 NEXT: owner feedback on prototype → widen slices (real E2B SandboxProvider,
 multi-org, SSO wrap, plan-then-execute stub, Composio connectors).
 Branch: `claude/hybrid-ai-platform-planning-upe28l` (all work lands here).
+2026-08-16 (local session): work moved to owner's Mac at
+`~/Documents/Claude/AgentOS/OpenMausBot`; buzz reference clone alongside.
+Postma AgentOS video studied → `docs/platform/research/agentos-video-study.md`
+(gap list: inbox/AskUser, goal loops + guardrails, pipeline templates,
+egress allowlists, files-MCP, YAML+CLI sync, librarian, costs) and BINDING
+design direction: UI = type.com × OpenMausBot cross (doc §4 has the rules —
+indigo accent replaces teal, light-first warm ground, OMB motion set).
 
 ## Baselines
 
