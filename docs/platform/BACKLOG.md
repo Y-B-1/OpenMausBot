@@ -63,6 +63,7 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (044c8d9) Review queue applies ONLY to agent proposals (make this visually
       obvious — this confused the owner).
 - [x] (05b8360) Memory search: `memory_search` agent tool + team walls (passesTeamWall/searchMemory in memory-gates).
+- [x] (60b9b4f) Refined segmentation UI: per-category sections within scope tabs (fact/preference/procedure/episode/glossary/lesson with labels + one-line explanations + counts, newest first), filters row (search, source chips, per-team chips), stat-mini strip, tightened MemoryCard meta line; "lesson" added to MemoryKind (80b75c1).
 
 ### E5 — Engine room: Managed Agents + Agent SDK + Foundry option
 - [x] (08d2a83) `managed` driver SCAFFOLD: CMA agent-per-Atrium-agent cache, session-per-turn with initial_events + $5 budget cap, event polling to idle. Live validation still blocked on ANTHROPIC_API_KEY.
