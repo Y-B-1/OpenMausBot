@@ -92,7 +92,14 @@ Update it every iteration; mark DONE with commit hashes.
       #product chat + pending @Dev question, DM, SharePoint org memory +
       Confluence team memory synced, Jira agent connector, Outlook
       disconnected, done + halted goals, gated pipeline.
-- [ ] Screenshot set per view, light+dark, committed.
+- [x] (218c0d7) Screenshot set per view, light+dark, committed (w8 gallery:
+      board, admin-connectors, memory-org, inbox, files, channel with live
+      presence chip; regenerate any time with `scripts/screenshots.mjs`).
+- [x] (402350e) Deployment README: plain-language install/run/backup/keys/
+      demo/health-gate quickstart in platform/README.md.
+- [x] (db628a7) PWA-lite: installable manifest + theme-color; hidden-tab
+      desktop notifications for inbox items/questions (opt-in from Inbox,
+      no service worker — push proper needs infra we don't have).
 - [x] (76b99fc) Live walkthrough available at any time via `pnpm demo`
       (requires `pnpm start` first; friendly error otherwise).
 
