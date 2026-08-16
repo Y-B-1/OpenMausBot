@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit && vitest run",
+    "start": "node --experimental-strip-types server/main.ts",
     "dev": "node --experimental-strip-types server/main.ts",
     "seed": "node --experimental-strip-types server/seed.ts",
     "dev:web": "vite --config web/vite.config.ts",

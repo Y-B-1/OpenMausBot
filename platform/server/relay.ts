@@ -3,6 +3,8 @@
 // projections fold → side-effect hooks.
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import type {
   AgentRecord,
@@ -68,6 +70,28 @@ export type Relay = {
 function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+// W8 (one-command-start): serve the built web UI (web/dist) for non-API GETs.
+const WEB_DIST = path.join(import.meta.dirname, "..", "web", "dist");
+const MIME: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".json": "application/json",
+};
+function serveStatic(pathname: string, res: http.ServerResponse): boolean {
+  if (!fs.existsSync(WEB_DIST)) return false;
+  const rel = pathname === "/" ? "index.html" : pathname.slice(1);
+  let file = path.normalize(path.join(WEB_DIST, rel));
+  if (!file.startsWith(WEB_DIST)) return false;
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(WEB_DIST, "index.html");
+  res.writeHead(200, { "content-type": MIME[path.extname(file)] ?? "application/octet-stream" });
+  res.end(fs.readFileSync(file));
+  return true;
 }
 
 async function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -165,6 +189,11 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const parts = url.pathname.split("/").filter(Boolean);
       const method = req.method ?? "GET";
+
+      // Built web UI (unauthenticated; login happens in-app).
+      if (method === "GET" && !url.pathname.startsWith("/api") && !url.pathname.startsWith("/ws")) {
+        if (serveStatic(url.pathname, res)) return;
+      }
 
       // Auth-lite login (the only unauthenticated route).
       if (method === "POST" && url.pathname === "/api/login") {
