@@ -327,6 +327,9 @@ export type ConnectorUpdatedBody = {
   connectorId: string;
   status?: "connected" | "disconnected";
   tools?: ConnectorTool[];
+  /** E3: admin re-partitioning — applies to FUTURE syncs only. null teamId clears the wall. */
+  scope?: ConnectorScope;
+  teamId?: string | null;
 };
 export type ConnectorSyncedBody = {
   kind: typeof EventKind.ConnectorSynced;

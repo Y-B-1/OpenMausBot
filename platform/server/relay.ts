@@ -11,6 +11,7 @@ import type {
   AtriumEvent,
   Channel,
   ConnectorRecord,
+  ConnectorScope,
   ConnectorTool,
   EventBody,
   GoalGuardrails,
@@ -272,11 +273,23 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
         // GET /api/state
         if (method === "GET" && url.pathname === "/api/state") {
           const channels = [...projections.channels.values()].filter((c) => c.memberIds.includes(userId));
+          const viewerIsAdmin = projections.users.get(userId)?.role === "admin";
+          // E3 team walls, enforced server-side: members never receive entries
+          // behind another team's wall, nor other people's personal entries.
+          const visibleMemory = [...projections.memory.values()].filter((m) => {
+            if (viewerIsAdmin) return true;
+            if (m.scope === "personal") return m.provenance.author === userId;
+            if (m.scope === "space" && m.teamId) {
+              const team = projections.teams.get(m.teamId);
+              return !!team && team.memberIds.includes(userId);
+            }
+            return true; // org scope and unwalled space entries are org-open
+          });
           return json(res, 200, {
             channels,
             roster: [...projections.users.values()],
             agents: [...projections.agents.values()],
-            memory: [...projections.memory.values()],
+            memory: visibleMemory,
             approvals: [...projections.approvals.values()],
             routines: [...projections.routines.values()],
             inbox: [...projections.inbox.values()],
@@ -483,8 +496,12 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           const connector = projections.connectors.get(parts[2]!);
           if (!connector) return json(res, 404, { error: "unknown connector" });
           const body = await readBody(req);
-          const patch: { status?: "connected" | "disconnected"; tools?: ConnectorTool[] } = {};
+          const patch: { status?: "connected" | "disconnected"; tools?: ConnectorTool[]; scope?: ConnectorScope; teamId?: string | null } = {};
           if (body["status"] === "connected" || body["status"] === "disconnected") patch.status = body["status"];
+          // E3: admin re-partitioning — new scope/teamId applies to FUTURE syncs.
+          if (body["scope"] === "org" || body["scope"] === "team" || body["scope"] === "user") patch.scope = body["scope"];
+          if (body["teamId"] === null) patch.teamId = null;
+          else if (typeof body["teamId"] === "string" && body["teamId"]) patch.teamId = body["teamId"];
           if (Array.isArray(body["tools"])) {
             patch.tools = (body["tools"] as Array<Record<string, unknown>>).map((t) => ({
               name: String(t["name"] ?? ""),

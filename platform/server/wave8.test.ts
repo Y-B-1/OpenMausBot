@@ -1,9 +1,10 @@
 // Wave 8 tests: deployable auth (passwords + persisted sessions) and JSON import.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AgentRecord, GoalRecord, TemplateRecord, User } from "../shared/contracts.ts";
+import { EventKind, type AgentRecord, type GoalRecord, type TemplateRecord, type User } from "../shared/contracts.ts";
 import { EventStore } from "./store.ts";
 import { createRelay, type Relay } from "./relay.ts";
 import { createDispatcher, type Dispatcher } from "./agents/dispatcher.ts";
@@ -242,6 +243,70 @@ describe("import (W8)", () => {
     const { files } = JSON.parse(res.text) as { files: Array<{ name: string }> };
     expect(files.length).toBe(1);
     expect(files[0]!.name).toBe("notes.md");
+  });
+
+  it("memory walls (E3): member of no team gets org + own personal entries only; admin sees all", async () => {
+    const { relay, base } = await boot();
+    const admin = await login(base, "Yosri");
+    const sara = await login(base, "Sara"); // member, no team
+    const team = (await post(base, admin.token, "/api/teams", { name: "Legal" })).data["team"] as { id: string };
+    // Team-walled entries via a team-scoped memory connector sync (3 sharepoint items).
+    const teamConn = (await post(base, admin.token, "/api/connectors", { provider: "sharepoint", kind: "memory", scope: "team", teamId: team.id })).data["connector"] as { id: string };
+    await post(base, admin.token, `/api/connectors/${teamConn.id}`, { status: "connected" });
+    await post(base, admin.token, `/api/connectors/${teamConn.id}/sync`);
+    // Org entry via an org-scoped connector sync (1 onedrive item).
+    const orgConn = (await post(base, admin.token, "/api/connectors", { provider: "onedrive", kind: "memory" })).data["connector"] as { id: string };
+    await post(base, admin.token, `/api/connectors/${orgConn.id}`, { status: "connected" });
+    await post(base, admin.token, `/api/connectors/${orgConn.id}/sync`);
+    // Personal entries for Sara and for Yosri.
+    const personal = (author: string, content: string) =>
+      relay.emitEvent(author, {
+        kind: EventKind.MemoryProposed,
+        entry: {
+          id: crypto.randomUUID(),
+          scope: "personal",
+          kind: "preference",
+          content,
+          provenance: { author, sessionRef: "test" },
+          trustTier: "human_confirmed",
+          status: "active",
+          ts: Date.now(),
+          source: "human",
+        },
+      } as never);
+    personal(sara.user.id, "Sara prefers short updates");
+    personal(admin.user.id, "Yosri prefers dashboards");
+
+    const saraState = JSON.parse((await get(base, sara.token, "/api/state")).text) as { memory: Array<{ scope: string; teamId?: string; content: string }> };
+    expect(saraState.memory.length).toBe(2); // 1 org + her own personal
+    expect(saraState.memory.some((m) => m.scope === "org")).toBe(true);
+    expect(saraState.memory.some((m) => m.content === "Sara prefers short updates")).toBe(true);
+    expect(saraState.memory.some((m) => m.teamId === team.id)).toBe(false);
+    expect(saraState.memory.some((m) => m.content === "Yosri prefers dashboards")).toBe(false);
+
+    const adminState = JSON.parse((await get(base, admin.token, "/api/state")).text) as { memory: unknown[] };
+    expect(adminState.memory.length).toBe(6); // 3 team + 1 org + 2 personal
+  });
+
+  it("connector re-scope (E3): admin flips scope after creation; FUTURE syncs follow the new partition", async () => {
+    const { relay, base } = await boot();
+    const admin = await login(base, "Yosri");
+    const team = (await post(base, admin.token, "/api/teams", { name: "Legal" })).data["team"] as { id: string };
+    const conn = (await post(base, admin.token, "/api/connectors", { provider: "onedrive", kind: "memory", scope: "team", teamId: team.id })).data["connector"] as { id: string };
+    await post(base, admin.token, `/api/connectors/${conn.id}`, { status: "connected" });
+    await post(base, admin.token, `/api/connectors/${conn.id}/sync`);
+    const walled = [...relay.projections.memory.values()];
+    expect(walled.every((m) => m.scope === "space" && m.teamId === team.id)).toBe(true);
+    // Flip to org: the wall comes down for future syncs; past entries keep theirs.
+    const flip = await post(base, admin.token, `/api/connectors/${conn.id}`, { scope: "org", teamId: null });
+    expect(flip.status).toBe(200);
+    const record = relay.projections.connectors.get(conn.id)!;
+    expect(record.scope).toBe("org");
+    expect(record.teamId).toBeUndefined();
+    await post(base, admin.token, `/api/connectors/${conn.id}/sync`);
+    const after = [...relay.projections.memory.values()];
+    expect(after.length).toBe(walled.length * 2);
+    expect(after.filter((m) => m.scope === "org" && m.teamId === undefined).length).toBe(walled.length);
   });
 
   it("import is admin-only: non-admin gets 403", async () => {

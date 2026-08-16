@@ -290,6 +290,11 @@ export class Projections {
         if (c) {
           if (body.status) c.status = body.status;
           if (body.tools) c.tools = body.tools.map((t) => ({ ...t }));
+          if (body.scope) c.scope = body.scope;
+          if (body.teamId === null) delete c.teamId;
+          else if (typeof body.teamId === "string") c.teamId = body.teamId;
+          // A connector re-scoped to org carries no team wall.
+          if (body.scope === "org") delete c.teamId;
         }
         break;
       }
