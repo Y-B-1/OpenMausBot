@@ -3,8 +3,10 @@
 // Usage: corepack pnpm demo   (start the stack first: corepack pnpm start)
 // Idempotent: if a "product" channel already exists, seeding is skipped.
 
+// Base resolution: --base <url> flag > BASE env > ATRIUM_PORT env > localhost:8900.
+const baseArgIdx = process.argv.indexOf("--base");
 const PORT = process.env.ATRIUM_PORT ?? "8900";
-const BASE = `http://localhost:${PORT}`;
+const BASE = (baseArgIdx !== -1 ? process.argv[baseArgIdx + 1] : process.env.BASE ?? `http://localhost:${PORT}`).replace(/\/$/, "");
 
 async function api(pathName, { method = "GET", token, body } = {}) {
   const res = await fetch(`${BASE}${pathName}`, {
