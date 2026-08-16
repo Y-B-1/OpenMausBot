@@ -1573,9 +1573,19 @@ function ChatView({ channel, onPromote }: { channel: Channel; onPromote?: () => 
   const feed = state.feeds[channel.id] ?? [];
   const pending = Object.values(state.pendingTurns).filter((t) => t.channelId === channel.id);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Auto-scroll only while the reader is pinned near the bottom (within
+  // 120px); scrolling up to read history stops the feed from yanking them down.
+  const pinnedRef = useRef(true);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  };
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [feed.length, pending.map((p) => p.text).join("")]);
+    pinnedRef.current = true; // a fresh channel always opens at the bottom
+  }, [channel.id]);
+  useEffect(() => {
+    if (pinnedRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [channel.id, feed.length, pending.map((p) => p.text).join("")]);
 
   return (
     <section className="chat">
@@ -1588,7 +1598,7 @@ function ChatView({ channel, onPromote }: { channel: Channel; onPromote?: () => 
           </button>
         )}
       </header>
-      <div className="chat-scroll" ref={scrollRef}>
+      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         {feed.length === 0 && pending.length === 0 && (
           <div className="chat-empty">No messages yet. Say hello — or add an agent and @mention it.</div>
         )}
