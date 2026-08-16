@@ -282,7 +282,7 @@ describe("import (W8)", () => {
     const admin = await login(base, "Yosri");
     const sara = await login(base, "Sara"); // member, no team
     const team = (await post(base, admin.token, "/api/teams", { name: "Legal" })).data["team"] as { id: string };
-    // Team-walled entries via a team-scoped memory connector sync (3 sharepoint items).
+    // Team-walled entries via a team-scoped memory connector sync (5 sharepoint items).
     const teamConn = (await post(base, admin.token, "/api/connectors", { provider: "sharepoint", kind: "memory", scope: "team", teamId: team.id })).data["connector"] as { id: string };
     await post(base, admin.token, `/api/connectors/${teamConn.id}`, { status: "connected" });
     await post(base, admin.token, `/api/connectors/${teamConn.id}/sync`);
@@ -317,7 +317,7 @@ describe("import (W8)", () => {
     expect(saraState.memory.some((m) => m.content === "Yosri prefers dashboards")).toBe(false);
 
     const adminState = JSON.parse((await get(base, admin.token, "/api/state")).text) as { memory: unknown[] };
-    expect(adminState.memory.length).toBe(6); // 3 team + 1 org + 2 personal
+    expect(adminState.memory.length).toBe(8); // 5 team + 1 org + 2 personal
   });
 
   it("connector re-scope (E3): admin flips scope after creation; FUTURE syncs follow the new partition", async () => {
