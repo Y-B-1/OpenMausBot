@@ -25,7 +25,7 @@ import type {
   User,
 } from "../shared/contracts.ts";
 import { EventKind } from "../shared/contracts.ts";
-import { EventStore, Projections } from "./store.ts";
+import { dataDir, EventStore, Projections } from "./store.ts";
 import { exportYaml } from "./yaml.ts";
 import { PROVIDER_CATALOG, defaultTools, providerInfo, syncItems } from "./connectors.ts";
 import { providerStatuses } from "./providers.ts";
@@ -108,6 +108,35 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
 
   const sessions = new Map<string, Session>(); // token -> session
   const subs = new Set<Sub>();
+
+  // ---- W8 (auth-deployable): password hashes + session tokens persist under dataDir() ----
+  const authFile = path.join(dataDir(), "auth.json");
+  const sessionsFile = path.join(dataDir(), "sessions.json");
+  type PasswordRec = { salt: string; hash: string };
+  const passwords = new Map<string, PasswordRec>(); // user name -> scrypt record
+  const readJsonFile = (file: string): Record<string, unknown> => {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  };
+  for (const [name, rec] of Object.entries(readJsonFile(authFile))) {
+    const r = rec as Partial<PasswordRec>;
+    if (typeof r.salt === "string" && typeof r.hash === "string") passwords.set(name, { salt: r.salt, hash: r.hash });
+  }
+  for (const [token, userId] of Object.entries(readJsonFile(sessionsFile))) {
+    if (typeof userId === "string") sessions.set(token, { token, userId });
+  }
+  const savePasswords = (): void => {
+    fs.mkdirSync(dataDir(), { recursive: true });
+    fs.writeFileSync(authFile, JSON.stringify(Object.fromEntries(passwords)), "utf8");
+  };
+  const saveSessions = (): void => {
+    fs.mkdirSync(dataDir(), { recursive: true });
+    fs.writeFileSync(sessionsFile, JSON.stringify(Object.fromEntries([...sessions.values()].map((s) => [s.token, s.userId]))), "utf8");
+  };
+  const hashPassword = (password: string, salt: string): string => crypto.scryptSync(password, salt, 32).toString("hex");
 
   const isMember = (channelId: string, userId: string): boolean => {
     const ch = projections.channels.get(channelId);
@@ -200,6 +229,21 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
         const body = await readBody(req);
         const name = typeof body["name"] === "string" ? (body["name"] as string).trim() : "";
         if (!name) return json(res, 400, { error: "name required" });
+        // W8: first password sets it; once set, logins require it. Users who
+        // never provided a password stay password-less (legacy behavior).
+        const password = typeof body["password"] === "string" ? (body["password"] as string) : "";
+        const rec = passwords.get(name);
+        if (rec) {
+          const expected = Buffer.from(rec.hash, "hex");
+          const got = Buffer.from(hashPassword(password, rec.salt), "hex");
+          if (!password || expected.length !== got.length || !crypto.timingSafeEqual(expected, got)) {
+            return json(res, 401, { error: "invalid password" });
+          }
+        } else if (password) {
+          const salt = crypto.randomBytes(16).toString("hex");
+          passwords.set(name, { salt, hash: hashPassword(password, salt) });
+          savePasswords();
+        }
         let user = [...projections.users.values()].find((u) => u.kind === "human" && u.name === name);
         if (!user) {
           // W7: the first real human in the org is its admin. Synthetic
@@ -213,6 +257,7 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
         }
         const token = crypto.randomBytes(24).toString("hex");
         sessions.set(token, { token, userId: user.id });
+        saveSessions();
         return json(res, 200, { token, user });
       }
 
@@ -595,6 +640,79 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           if (idx < 0) return json(res, 409, { error: "no step awaiting approval" });
           emit(newEvent(org, userId, { kind: EventKind.PipelineStepCompleted, runId: run.id, stepIndex: idx, gated: false }, run.channelId));
           return json(res, 200, { ok: true });
+        }
+
+        // POST /api/import — admin-only: recreate agents/templates/routines from
+        // an export-shaped JSON document (W8). Steps without agentId bind to the
+        // first imported (or first existing) agent.
+        if (method === "POST" && url.pathname === "/api/import") {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const body = await readBody(req);
+          const rawAgents = Array.isArray(body["agents"]) ? (body["agents"] as Array<Record<string, unknown>>) : [];
+          const rawTemplates = Array.isArray(body["templates"]) ? (body["templates"] as Array<Record<string, unknown>>) : [];
+          const rawRoutines = Array.isArray(body["routines"]) ? (body["routines"] as Array<Record<string, unknown>>) : [];
+          const created = { agents: 0, templates: 0, routines: 0 };
+          let firstImportedAgentId: string | undefined;
+          for (const a of rawAgents) {
+            const agentName = String(a["name"] ?? "").trim();
+            if (!agentName) continue;
+            const rawDriver = String(a["driver"] ?? "mock");
+            const driver = (["anthropic", "managed", "foundry", "openai_compat"] as const).find((d) => d === rawDriver) ?? "mock";
+            const agentUser: User = { id: crypto.randomUUID(), name: agentName, kind: "agent" };
+            const agent: AgentRecord = {
+              id: agentUser.id,
+              name: agentName,
+              persona: String(a["persona"] ?? ""),
+              driver,
+              modelPolicy: {
+                model: String(a["model"] ?? "claude-haiku-4-5"),
+                effort: String(a["effort"] ?? "low"),
+                maxTokens: 1024,
+              },
+              allowTools: Array.isArray(a["allowTools"]) ? (a["allowTools"] as unknown[]).map(String) : [],
+            };
+            emit(newEvent(org, userId, { kind: EventKind.MemberAdded, userId: agent.id, user: agentUser, agent }));
+            firstImportedAgentId ??= agent.id;
+            created.agents++;
+          }
+          const bindAgentId = firstImportedAgentId ?? [...projections.agents.keys()][0];
+          for (const t of rawTemplates) {
+            const templateName = String(t["name"] ?? "").trim();
+            const rawSteps = Array.isArray(t["steps"]) ? (t["steps"] as Array<Record<string, unknown>>) : [];
+            if (!templateName || rawSteps.length === 0) continue;
+            if (!bindAgentId) return json(res, 400, { error: "no agent to bind template steps to" });
+            const steps: TemplateStep[] = rawSteps.map((s) => ({
+              title: String(s["title"] ?? "step"),
+              agentId:
+                typeof s["agentId"] === "string" && projections.agents.has(s["agentId"] as string)
+                  ? (s["agentId"] as string)
+                  : bindAgentId,
+              prompt: String(s["prompt"] ?? ""),
+              requiresApproval: s["requiresApproval"] === true,
+            }));
+            emit(newEvent(org, userId, { kind: EventKind.TemplateCreated, template: { id: crypto.randomUUID(), name: templateName, steps } }));
+            created.templates++;
+          }
+          for (const r of rawRoutines) {
+            const routineName = String(r["name"] ?? "").trim();
+            const prompt = String(r["prompt"] ?? "").trim();
+            if (!routineName || !prompt) continue;
+            if (!bindAgentId) return json(res, 400, { error: "no agent to bind routine to" });
+            const rawSchedule = (r["schedule"] ?? {}) as Partial<{ kind: string; minutes: number }>;
+            const schedule: RoutineSchedule =
+              rawSchedule.kind === "interval"
+                ? { kind: "interval", minutes: Math.max(0, Number(rawSchedule.minutes ?? 60)) }
+                : { kind: "manual" };
+            const agentId =
+              typeof r["agentId"] === "string" && projections.agents.has(r["agentId"] as string)
+                ? (r["agentId"] as string)
+                : bindAgentId;
+            const channelId = typeof r["channelId"] === "string" ? (r["channelId"] as string) : "";
+            const routine: RoutineRecord = { id: crypto.randomUUID(), name: routineName, agentId, channelId, prompt, schedule };
+            emit(newEvent(org, userId, { kind: EventKind.RoutineCreated, routine }, channelId || undefined));
+            created.routines++;
+          }
+          return json(res, 200, { imported: created });
         }
 
         // GET /api/export — YAML of the org's operating config (W6-E)

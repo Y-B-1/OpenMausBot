@@ -1,0 +1,144 @@
+// Wave 8 tests: deployable auth (passwords + persisted sessions) and JSON import.
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { TemplateRecord, User } from "../shared/contracts.ts";
+import { EventStore } from "./store.ts";
+import { createRelay, type Relay } from "./relay.ts";
+
+const cleanups: Array<() => Promise<void> | void> = [];
+afterEach(async () => {
+  while (cleanups.length) await cleanups.pop()!();
+});
+
+let savedDataDir: string | undefined;
+beforeEach(() => {
+  savedDataDir = process.env["ATRIUM_DATA_DIR"];
+  process.env["ATRIUM_DATA_DIR"] = fs.mkdtempSync(path.join(os.tmpdir(), "atrium-w8-"));
+  const dir = process.env["ATRIUM_DATA_DIR"]!;
+  cleanups.push(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (savedDataDir === undefined) delete process.env["ATRIUM_DATA_DIR"];
+    else process.env["ATRIUM_DATA_DIR"] = savedDataDir;
+  });
+});
+
+async function boot(): Promise<{ relay: Relay; base: string; dir: string }> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atrium-w8-store-"));
+  const relay = createRelay(new EventStore(dir));
+  const port = await relay.listen(0);
+  cleanups.push(async () => {
+    await relay.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return { relay, base: `http://127.0.0.1:${port}`, dir };
+}
+
+async function login(base: string, name: string, password?: string) {
+  const body: Record<string, string> = { name };
+  if (password !== undefined) body["password"] = password;
+  const res = await fetch(`${base}/api/login`, { method: "POST", body: JSON.stringify(body) });
+  return { status: res.status, ...((await res.json()) as { token: string; user: User }) };
+}
+
+async function post(base: string, token: string, pathName: string, body: unknown = {}) {
+  const res = await fetch(`${base}${pathName}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, data: (await res.json()) as Record<string, unknown> };
+}
+
+async function get(base: string, token: string, pathName: string) {
+  const res = await fetch(`${base}${pathName}`, { headers: { authorization: `Bearer ${token}` } });
+  return { status: res.status, text: await res.text() };
+}
+
+describe("auth deployable (W8)", () => {
+  it("first login sets the password; wrong or missing password is 401 after", async () => {
+    const { base } = await boot();
+    const first = await login(base, "Yosri", "hunter2");
+    expect(first.status).toBe(200);
+    expect(first.user.role).toBe("admin");
+    expect((await login(base, "Yosri", "wrong")).status).toBe(401);
+    expect((await login(base, "Yosri")).status).toBe(401);
+    const again = await login(base, "Yosri", "hunter2");
+    expect(again.status).toBe(200);
+    expect(again.user.id).toBe(first.user.id);
+  });
+
+  it("legacy password-less user stays password-less until they set one at login", async () => {
+    const { base } = await boot();
+    expect((await login(base, "Sara")).status).toBe(200);
+    expect((await login(base, "Sara")).status).toBe(200); // still no password required
+    expect((await login(base, "Sara", "s3cret")).status).toBe(200); // sets it
+    expect((await login(base, "Sara")).status).toBe(401); // now required
+    expect((await login(base, "Sara", "s3cret")).status).toBe(200);
+  });
+
+  it("passwords and session tokens survive a relay restart", async () => {
+    const { relay, base, dir } = await boot();
+    const admin = await login(base, "Yosri", "hunter2");
+    expect((await get(base, admin.token, "/api/state")).status).toBe(200);
+    await relay.close();
+
+    // Same EventStore dir + same data dir: sessions and passwords reload.
+    const relay2 = createRelay(new EventStore(dir));
+    const port2 = await relay2.listen(0);
+    cleanups.push(() => relay2.close());
+    const base2 = `http://127.0.0.1:${port2}`;
+    const state = await get(base2, admin.token, "/api/state");
+    expect(state.status).toBe(200); // old token still authorized
+    expect((await login(base2, "Yosri", "wrong")).status).toBe(401);
+    expect((await login(base2, "Yosri", "hunter2")).status).toBe(200);
+  });
+});
+
+describe("import (W8)", () => {
+  it("round-trips agents and templates into a fresh relay via /api/import", async () => {
+    const { relay: relayA, base: baseA } = await boot();
+    const adminA = await login(baseA, "Yosri");
+    const dev = (await post(baseA, adminA.token, "/api/agents", { name: "Dev", persona: "builds things" })).data["agent"] as { id: string; name: string };
+    await post(baseA, adminA.token, "/api/templates", {
+      name: "Ship",
+      steps: [
+        { title: "draft", agentId: dev.id, prompt: "write it", requiresApproval: false },
+        { title: "review", agentId: dev.id, prompt: "check it", requiresApproval: true },
+      ],
+    });
+    const exported = await get(baseA, adminA.token, "/api/export");
+    expect(exported.status).toBe(200);
+    expect(exported.text).toContain("Ship");
+    // Transform the export into the JSON import shape (agentIds dropped).
+    const doc = {
+      agents: [...relayA.projections.agents.values()].map((a) => ({ name: a.name, persona: a.persona, driver: a.driver, model: a.modelPolicy.model })),
+      templates: [...relayA.projections.templates.values()].map((t) => ({
+        name: t.name,
+        steps: t.steps.map((s) => ({ title: s.title, prompt: s.prompt, requiresApproval: s.requiresApproval })),
+      })),
+    };
+
+    const { relay: relayB, base: baseB } = await boot();
+    const adminB = await login(baseB, "Boss");
+    const imp = await post(baseB, adminB.token, "/api/import", doc);
+    expect(imp.status).toBe(200);
+    expect(imp.data["imported"]).toEqual({ agents: 1, templates: 1, routines: 0 });
+    const agentB = [...relayB.projections.agents.values()].find((a) => a.name === "Dev")!;
+    expect(agentB).toBeDefined();
+    const templateB = [...relayB.projections.templates.values()].find((t) => t.name === "Ship") as TemplateRecord;
+    expect(templateB.steps.map((s) => s.title)).toEqual(["draft", "review"]);
+    expect(templateB.steps.map((s) => s.requiresApproval)).toEqual([false, true]);
+    // Steps without agentId bind to the first imported agent.
+    expect(templateB.steps.every((s) => s.agentId === agentB.id)).toBe(true);
+  });
+
+  it("import is admin-only: non-admin gets 403", async () => {
+    const { base } = await boot();
+    await login(base, "Yosri"); // first human becomes admin
+    const member = await login(base, "Sara");
+    const denied = await post(base, member.token, "/api/import", { agents: [{ name: "X" }] });
+    expect(denied.status).toBe(403);
+  });
+});
