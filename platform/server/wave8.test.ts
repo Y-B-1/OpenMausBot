@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { TemplateRecord, User } from "../shared/contracts.ts";
+import type { AgentRecord, GoalRecord, TemplateRecord, User } from "../shared/contracts.ts";
 import { EventStore } from "./store.ts";
 import { createRelay, type Relay } from "./relay.ts";
+import { createDispatcher, type Dispatcher } from "./agents/dispatcher.ts";
+import { createEngines, type Engines } from "./agents/engines.ts";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -33,6 +35,21 @@ async function boot(): Promise<{ relay: Relay; base: string; dir: string }> {
     fs.rmSync(dir, { recursive: true, force: true });
   });
   return { relay, base: `http://127.0.0.1:${port}`, dir };
+}
+
+async function bootWithEngines(): Promise<{ relay: Relay; dispatcher: Dispatcher; engines: Engines; base: string }> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atrium-w8-store-"));
+  const relay = createRelay(new EventStore(dir));
+  const dispatcher = createDispatcher(relay);
+  const engines = createEngines(relay, dispatcher);
+  const port = await relay.listen(0);
+  cleanups.push(async () => {
+    engines.dispose();
+    dispatcher.dispose();
+    await relay.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return { relay, dispatcher, engines, base: `http://127.0.0.1:${port}` };
 }
 
 async function login(base: string, name: string, password?: string) {
@@ -161,6 +178,33 @@ describe("import (W8)", () => {
     const member = await login(base, "Sara");
     const res = await get(base, member.token, "/api/audit");
     expect(res.status).toBe(403);
+  });
+
+  it("self-review (E6): a completed goal lands an agent lesson in the memory review queue", async () => {
+    const { relay, dispatcher, engines, base } = await bootWithEngines();
+    const admin = await login(base, "Yosri");
+    const { data: chData } = await post(base, admin.token, "/api/channels", { name: "ops", space: "general" });
+    const ch = (chData["channel"] as { id: string }).id;
+    const { data: agData } = await post(base, admin.token, "/api/agents", { name: "Dev", channelId: ch });
+    const agent = agData["agent"] as AgentRecord;
+    await post(base, admin.token, "/api/goals", {
+      name: "Ship it",
+      spec: "ship the thing",
+      criteria: ["build the thing"],
+      agentId: agent.id,
+      channelId: ch,
+    });
+    await engines.settled();
+    await dispatcher.idle(ch);
+    const goal = [...relay.projections.goals.values()].find((g: GoalRecord) => g.name === "Ship it")!;
+    expect(goal.status).toBe("done");
+    // The mock driver's review handler proposed a lesson mentioning the goal.
+    const proposal = [...relay.projections.memory.values()].find(
+      (m) => m.provenance.author === agent.id && m.content.includes("Ship it"),
+    );
+    expect(proposal).toBeDefined();
+    expect(["agent_proposed", "quarantined"]).toContain(proposal!.trustTier);
+    expect(proposal!.status).toBe("active");
   });
 
   it("import is admin-only: non-admin gets 403", async () => {

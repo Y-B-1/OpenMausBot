@@ -78,6 +78,20 @@ export function createEngines(relay: Relay, dispatcher: Dispatcher): Engines {
       const open = goal.criteria.find((c) => !c.done);
       if (!open) {
         relay.emitEvent(ORCHESTRATOR.id, { kind: EventKind.GoalCompleted, goalId }, goal.channelId);
+        // E6 self-review loop: ask the agent to grade its own finished goal;
+        // the reply routes a lesson into the memory review queue.
+        const done = projections.agents.get(goal.agentId);
+        if (done) {
+          relay.emitEvent(
+            ORCHESTRATOR.id,
+            {
+              kind: EventKind.Message,
+              text: `@${done.name} review the finished goal '${goal.name}': list one thing to improve next time and propose it to memory.`,
+            },
+            goal.channelId,
+          );
+          await dispatcher.idle(goal.channelId);
+        }
         return;
       }
       const agent = projections.agents.get(goal.agentId);

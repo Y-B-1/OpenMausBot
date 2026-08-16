@@ -89,6 +89,23 @@ export class MockDriver implements AgentDriver {
       return { text };
     }
 
+    // E6 self-review: after GoalCompleted the orchestrator asks for a lesson.
+    const reviewMatch = /review the finished goal '([^']+)'/i.exec(lastText);
+    if (reviewMatch) {
+      const goalName = reviewMatch[1]!;
+      const lesson = `Lesson from goal "${goalName}": define tighter success criteria up front.`;
+      const result = await callbacks.onToolCall("memory_propose", {
+        scope: "space",
+        kind: "lesson",
+        content: lesson,
+      });
+      const text = result.ok
+        ? `Reviewed goal "${goalName}" — proposed a lesson to memory.`
+        : `Review failed to propose memory: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+
     // W6-B: goal sessions — the orchestrator asks the agent to work one criterion.
     if (/work on criterion/i.test(lastText)) {
       const text = /impossible/i.test(lastText) ? "BLOCKED: cannot satisfy this criterion." : "DONE: criterion satisfied.";
