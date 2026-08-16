@@ -24,7 +24,7 @@ Update it every iteration; mark DONE with commit hashes.
       channels auto-created per agent); DM quality ≥ upstream OpenMausBot
       chat (port its streaming/composer polish where better).
 - [x] (0472fa3) Cross-room flow: chat header 'Promote to goal' pre-selects the channel; inbox/question cards deep-link 'Open the room this came from'.
-- [ ] Group chat polish: typing/turn indicators, agent status chips.
+- [x] (f3f4271) Group chat polish: typing/turn indicators (PendingBubble), roster presence chips (responding…/idle from pendingTurns).
 - [x] (312def4) Task board view (Board nav): todo/doing/needs-you/done columns from goals+pipelines, cards deep-link.
 
 ### E2 — Connectors (the owner's memory vision)
@@ -75,9 +75,10 @@ Update it every iteration; mark DONE with commit hashes.
       partition an agent inherits on entry (our `space` field, promoted).
 - [ ] Import-from-local onboarding: ingest CLAUDE.md/skills from a repo to
       seed agent configs (we have YAML export; add import).
-- [ ] Self-review loop: agents grade own outputs → verdicts written back as
-      memory proposals.
-- [ ] Doc surface: artifacts produced by agents browsable per Space.
+- [x] (54196b5) Self-review loop: GoalCompleted → orchestrator posts a review
+      prompt; agent proposes a lesson to memory (review queue).
+- [x] (f943bdd) Doc surface: Files view (GET /api/files from FileWritten
+      replay, grouped by agent).
 
 ### E7 — Demo & evidence (owner sees everything)
 - [ ] Rich seed: admin + 2 members, 2 teams, DMs, group channel, running +
