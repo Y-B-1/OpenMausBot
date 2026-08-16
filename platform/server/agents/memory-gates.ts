@@ -20,7 +20,7 @@ export function tierFor(content: string): TrustTier {
 }
 
 const SCOPES: MemoryScope[] = ["org", "space", "personal"];
-const KINDS: MemoryKind[] = ["fact", "preference", "procedure", "episode", "glossary"];
+const KINDS: MemoryKind[] = ["fact", "preference", "procedure", "episode", "glossary", "lesson"];
 
 export function buildProposal(input: {
   scope: unknown;

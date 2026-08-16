@@ -129,7 +129,7 @@ export type Channel = {
 };
 
 export type MemoryScope = "org" | "space" | "personal";
-export type MemoryKind = "fact" | "preference" | "procedure" | "episode" | "glossary";
+export type MemoryKind = "fact" | "preference" | "procedure" | "episode" | "glossary" | "lesson";
 export type TrustTier = "quarantined" | "agent_proposed" | "human_confirmed" | "org_ratified";
 export type MemoryStatus = "active" | "superseded" | "retired";
 

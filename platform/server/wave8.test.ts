@@ -204,6 +204,7 @@ describe("import (W8)", () => {
       (m) => m.provenance.author === agent.id && m.content.includes("Ship it"),
     );
     expect(proposal).toBeDefined();
+    expect(proposal!.kind).toBe("lesson"); // W9: "lesson" is a real kind, no longer falls back to fact
     expect(["agent_proposed", "quarantined"]).toContain(proposal!.trustTier);
     expect(proposal!.status).toBe("active");
   });
