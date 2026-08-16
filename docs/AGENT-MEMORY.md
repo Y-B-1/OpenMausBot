@@ -5,15 +5,16 @@
 > **Update discipline:** same commit as the work it describes. **Prune:**
 > ≤200 lines; archive to `docs/agent-memory/`, never delete.
 
-## Current state — 2026-08-16
+## Current state — 2026-08-16 (batch 2 close)
 
-Fork of OpenMausBot being revamped into a hybrid next-gen platform
-(Grok Bot × Block Buzz × Type.com × PromptQL/OpenClaw/Hermes lessons).
-Research phase complete-ish: seven briefings in `docs/platform/research/`
-(Grok Bot and Buzz web briefings may still be landing). Buzz cloned read-only
-at `/workspace/block/buzz`; charge skills installed at `~/.claude/skills`
-(source: github.com/Y-B-1/charge). Next: synthesis + product vision →
-charge:design spec → plan → web-app prototype.
+Research COMPLETE: 10 briefings in `docs/platform/research/`, all red-teamed
+(`docs/platform/RED-TEAM.md`, 9 fact-check agents, 4 refuted claims patched
+in place). Synthesis in `docs/platform/VISION.md` (working name: Atrium);
+presentation artifact published (URL in VISION.md). Buzz cloned read-only at
+`/workspace/block/buzz`; charge skills at `~/.claude/skills`.
+NEXT: charge:design spec (needs owner alignment interview) → charge:plan →
+web prototype (thin slice: multi-tenant relay, channels, 2–3 live agents,
+tiered memory + review queue, one sandboxed computer, approvals).
 Branch: `claude/hybrid-ai-platform-planning-upe28l` (all work lands here).
 
 ## Baselines
