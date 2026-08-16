@@ -1,54 +1,80 @@
-# Atrium — prototype
+# Atrium
 
-The thin end-to-end slice of the platform described in `docs/platform/VISION.md`
-(design: `docs/platform/DESIGN.md`, plan: `docs/platform/PLAN.md`): channels
-where humans and agents coexist on one append-only event log, tiered memory
-with a human review queue, tool approvals, and sandboxed agent computers
-behind a `SandboxProvider` seam.
+A private workspace where your people and AI agents share channels, memory,
+goals, and pipelines — one server process, one data folder.
 
-## Run it
+## Requirements
 
-```bash
-pnpm install
-pnpm -C platform seed       # populate the acme demo workspace (recommended)
-pnpm -C platform dev        # relay server on :8900
-pnpm -C platform dev:web    # web UI on :8901
-```
+- Node.js 22 or newer (`node --version`)
+- pnpm via corepack (ships with Node): `corepack enable`
+- Google Chrome (only needed for the browser test in the health check)
 
-The seed creates a full demo: 3 channels (#general, #finance, #eng), agents
-Scout/Quill/Ledger, seeded conversations, memory across all four trust tiers
-(including one awaiting review and one quarantined injection attempt), a
-resolved and a pending approval with sandbox audit, and a scheduled routine.
-Log in as `Yosri`. Try: `Ledger, show me the Q3 revenue numbers` in #finance
-(query-plan card), approve the pending card in #eng, review the memory queue,
-and hit Run now on the Weekly eng digest routine.
-
-Open http://localhost:8901 — log in with any name, create a channel, add a
-mock agent, and talk to it: `@Scout please compute something` triggers a
-sandboxed tool call gated by an approval card; `@Scout remember …` files a
-memory proposal into the review queue (Memory panel).
-
-Set `ANTHROPIC_API_KEY` and add an agent with driver `anthropic` for real
-Claude turns (model from the agent's model policy, default Haiku-class).
-
-## Layout
-
-- `shared/contracts.ts` — event kinds (integer-extensible), records, wire types
-- `server/` — relay (node:http + ws): auth-lite sessions, fail-closed
-  `resolveOrg` tenancy seam, membership-checked channel-scoped fan-out,
-  NDJSON event store + projections rebuilt from the log
-- `server/agents/` — driver SPI (mock + Anthropic), per-channel single-in-flight
-  dispatcher with queue/batch, memory gates (quarantine → agent_proposed →
-  human_confirmed; data-not-directives injection), `LocalSandbox`
-  (allowlisted argv, no shell, audited)
-- `web/` — React 19 + Vite UI: chat with streaming + approval cards, memory
-  review queue and tier browser, per-agent computer audit panel
-
-## Checks
+## Install and build
 
 ```bash
-pnpm -C platform check      # tsc --noEmit + vitest (21 tests)
+cd platform
+corepack pnpm install
+corepack pnpm run build:web
 ```
 
-Prototype non-goals (see DESIGN.md): real multi-org, SSO, E2B/Firecracker
-backends, Composio, plan-then-execute engine. Each has a seam waiting.
+## Run
+
+```bash
+corepack pnpm start
+```
+
+One process serves the web app and the API at http://localhost:8900.
+Open it in a browser and log in.
+
+**First login is the admin.** The first real person to log in becomes the
+org admin (can promote others, manage teams, connectors, and memory walls).
+The first password you enter for a name becomes that name's password.
+
+## Where the data lives
+
+Everything is stored in one folder — `ATRIUM_DATA_DIR` if set, otherwise
+`platform/.data`:
+
+- `acme.ndjson` — the append-only event log (all channels, messages, goals,
+  memory; the entire workspace state is rebuilt from this file on boot)
+- `auth.json` — password hashes
+- `sessions.json` — login tokens (so restarts don't log everyone out)
+
+**To back up Atrium, back up that folder.** To move to another machine,
+copy the folder and set `ATRIUM_DATA_DIR` to point at it.
+
+## API keys (.env)
+
+Copy `.env.example` to `platform/.env` and fill in what you have. With no
+keys, agents run in mock mode (fine for the demo).
+
+| Key | What it unlocks |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Real Claude agents (direct Anthropic API) |
+| `FOUNDRY_API_KEY` + `FOUNDRY_RESOURCE` | Claude billed through Microsoft Foundry (Azure) |
+| `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY` | Any OpenAI-compatible model (Grok, DeepSeek, …) |
+
+Values already set in your shell environment win over `.env`.
+
+## Demo data
+
+With the server running:
+
+```bash
+corepack pnpm demo
+```
+
+Seeds a full walkthrough workspace: two users (Yosri admin, Sara member),
+two teams, a #product channel with agents, a DM, synced memory connectors,
+a finished and a halted goal, a pipeline waiting for approval, and a pending
+question in the Inbox. Safe to re-run; it detects an already-seeded server.
+
+## Health check
+
+```bash
+bash scripts/verify-all.sh
+```
+
+Runs the type check + test suite, a production build, a boot smoke test, and
+a full browser walkthrough of every screen. Exit code 0 means the install is
+healthy end to end.
