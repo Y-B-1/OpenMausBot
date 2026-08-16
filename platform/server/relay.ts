@@ -679,6 +679,22 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           const rawRoutines = Array.isArray(body["routines"]) ? (body["routines"] as Array<Record<string, unknown>>) : [];
           const created = { agents: 0, templates: 0, routines: 0 };
           let firstImportedAgentId: string | undefined;
+          // E6 import-from-local onboarding: a raw CLAUDE.md seeds a mock
+          // "Repo Assistant" agent whose persona is the doc's head.
+          if (typeof body["claudeMd"] === "string" && (body["claudeMd"] as string).trim() !== "") {
+            const agentUser: User = { id: crypto.randomUUID(), name: "Repo Assistant", kind: "agent" };
+            const agent: AgentRecord = {
+              id: agentUser.id,
+              name: "Repo Assistant",
+              persona: (body["claudeMd"] as string).slice(0, 2000),
+              driver: "mock",
+              modelPolicy: { model: "claude-haiku-4-5", effort: "low", maxTokens: 1024 },
+              allowTools: [],
+            };
+            emit(newEvent(org, userId, { kind: EventKind.MemberAdded, userId: agent.id, user: agentUser, agent }));
+            firstImportedAgentId = agent.id;
+            created.agents++;
+          }
           for (const a of rawAgents) {
             const agentName = String(a["name"] ?? "").trim();
             if (!agentName) continue;

@@ -336,6 +336,22 @@ describe("import (W8)", () => {
   });
 });
 
+describe("import-from-local onboarding (E6)", () => {
+  it("claudeMd in /api/import seeds a mock Repo Assistant agent from the doc head", async () => {
+    const { relay, base } = await boot();
+    const admin = await login(base, "Yosri");
+    const claudeMd = "# My repo rules\nAlways run tests.\n" + "x".repeat(3000);
+    const res = await post(base, admin.token, "/api/import", { claudeMd });
+    expect(res.status).toBe(200);
+    expect((res.data["imported"] as { agents: number }).agents).toBe(1);
+    const agent = [...relay.projections.agents.values()].find((a) => a.name === "Repo Assistant");
+    expect(agent).toBeDefined();
+    expect(agent!.driver).toBe("mock");
+    expect(agent!.persona.length).toBe(2000);
+    expect(agent!.persona.startsWith("# My repo rules")).toBe(true);
+  });
+});
+
 describe("E5 driver factories (key-gated, no network)", () => {
   it("foundry factory: null on empty env, non-null with both keys", async () => {
     const { createFoundryDriver } = await import("./agents/foundry.ts");
