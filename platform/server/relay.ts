@@ -309,6 +309,11 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
               }
               return false; // user-scoped (no owner field yet) and unteamed team-scope: fail closed
             }),
+            // In-flight agent turns in the viewer's channels, so a reload
+            // mid-turn keeps the "responding…" presence chip.
+            openTurns: Object.fromEntries(
+              [...projections.openTurns].filter(([, t]) => channels.some((c) => c.id === t.channelId)),
+            ),
             providers: providerStatuses(),
             me: projections.users.get(userId) ?? null,
             transcripts: Object.fromEntries(channels.map((c) => [c.id, projections.transcripts.get(c.id) ?? []])),

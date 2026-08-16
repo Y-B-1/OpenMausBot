@@ -231,6 +231,37 @@ describe("import (W8)", () => {
     expect((JSON.parse(memberRes.text) as { files: unknown[] }).files.length).toBe(1);
   });
 
+  it("open turns: /api/state carries an in-flight (ask_user-blocked) turn; answering clears it", async () => {
+    const { dispatcher, base } = await bootWithEngines();
+    const admin = await login(base, "Yosri");
+    const { data: chData } = await post(base, admin.token, "/api/channels", { name: "ops", space: "general" });
+    const ch = (chData["channel"] as { id: string }).id;
+    const { data: agData } = await post(base, admin.token, "/api/agents", { name: "Dev", channelId: ch });
+    const agent = agData["agent"] as AgentRecord;
+    await post(base, admin.token, `/api/channels/${ch}/messages`, { text: "@Dev ask me which option" });
+    // Poll until the blocking question exists — the turn is now open and stuck.
+    let question: { id: string } | undefined;
+    for (let i = 0; i < 100 && !question; i++) {
+      const state = JSON.parse((await get(base, admin.token, "/api/state")).text) as {
+        questions: Array<{ id: string; status: string }>;
+      };
+      question = state.questions.find((q) => q.status === "pending");
+      if (!question) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(question).toBeDefined();
+    const blocked = JSON.parse((await get(base, admin.token, "/api/state")).text) as {
+      openTurns: Record<string, { agentId: string; channelId: string }>;
+    };
+    const open = Object.values(blocked.openTurns);
+    expect(open.length).toBe(1);
+    expect(open[0]).toEqual({ agentId: agent.id, channelId: ch });
+    // Answer; once the turn completes the snapshot no longer carries it.
+    await post(base, admin.token, `/api/questions/${question!.id}/answer`, { answer: "Option A" });
+    await dispatcher.idle(ch);
+    const after = JSON.parse((await get(base, admin.token, "/api/state")).text) as { openTurns: Record<string, unknown> };
+    expect(Object.keys(after.openTurns).length).toBe(0);
+  });
+
   it("mock save-file: a trailing colon after the filename is not part of the name", async () => {
     const { dispatcher, base } = await bootWithEngines();
     const admin = await login(base, "Yosri");

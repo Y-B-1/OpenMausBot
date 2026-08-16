@@ -128,6 +128,7 @@ export type StateSnapshot = {
   teams?: TeamRecord[];
   connectors?: ConnectorRecord[];
   providers?: ProviderStatus[];
+  openTurns?: Record<string, { agentId: string; channelId: string }>;
   me?: User | null;
   transcripts: Record<
     string,
@@ -442,6 +443,12 @@ export function reducer(state: State, action: Action): State {
             : { t: "chip", eventId: i.eventId, authorId: i.authorId, ts: i.ts, text: i.text };
         });
       }
+      // Rebuild in-flight presence from the snapshot (streamed text so far is
+      // lost across a reload; the chip and bubble come back empty).
+      const pendingTurns: Record<string, PendingTurn> = {};
+      for (const [turnId, t] of Object.entries(action.snap.openTurns ?? {})) {
+        pendingTurns[turnId] = { turnId, agentId: t.agentId, text: "", channelId: t.channelId };
+      }
       // Surface pre-existing approval cards at the end of their channel feeds.
       for (const ap of action.snap.approvals) {
         const list = feeds[ap.channelId] ?? [];
@@ -466,6 +473,7 @@ export function reducer(state: State, action: Action): State {
         providers: action.snap.providers ?? [],
         me: action.snap.me ?? state.me,
         costs: action.snap.costs ?? [],
+        pendingTurns,
         feeds,
       };
     }

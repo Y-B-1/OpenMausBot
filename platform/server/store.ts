@@ -88,6 +88,8 @@ export class Projections {
   costs: TurnCost[] = [];
   teams = new Map<string, TeamRecord>();
   connectors = new Map<string, ConnectorRecord>();
+  /** In-flight agent turns, so /api/state can rebuild presence after a reload. */
+  openTurns = new Map<string, { agentId: string; channelId: string }>();
 
   rebuild(store: EventStore, org: string): void {
     this.channels.clear();
@@ -106,6 +108,7 @@ export class Projections {
     this.costs = [];
     this.teams.clear();
     this.connectors.clear();
+    this.openTurns.clear();
     for (const ev of store.replay(org)) this.fold(ev);
   }
 
@@ -130,11 +133,13 @@ export class Projections {
         break;
       case EventKind.AgentTurnStarted:
         this.pushTranscript(ev, "chip", `turn ${body.turnId} started`);
+        if (ev.channelId) this.openTurns.set(body.turnId, { agentId: ev.authorId, channelId: ev.channelId });
         break;
       case EventKind.AgentTurnCompleted:
         // Wave 2: the final text arrives as its own kind-1 message from the
         // dispatcher; projecting it here too would duplicate it.
         this.pushTranscript(ev, "chip", `turn ${body.turnId} completed`);
+        this.openTurns.delete(body.turnId);
         break;
       case EventKind.ApprovalRequested:
         this.approvals.set(body.approval.id, { ...body.approval });
