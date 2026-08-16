@@ -10,6 +10,7 @@ import type {
   GoalRecord,
   InboxItem,
   MemoryEntry,
+  MemoryKind,
   PipelineRun,
   QuestionRecord,
   RoutineRecord,
@@ -739,10 +740,33 @@ const TIER_LABEL: Record<string, string> = {
   org_ratified: "org ratified",
 };
 
+/** W9: category metadata — human label + one-line explanation per MemoryKind. */
+const KIND_META: { kind: MemoryKind; label: string; explain: string }[] = [
+  { kind: "fact", label: "Facts", explain: "Things that are true" },
+  { kind: "preference", label: "Preferences", explain: "How people like things done" },
+  { kind: "procedure", label: "Procedures", explain: "How we do things" },
+  { kind: "episode", label: "Episodes", explain: "What happened" },
+  { kind: "glossary", label: "Glossary", explain: "What words mean" },
+  { kind: "lesson", label: "Lessons learned", explain: "What agents learned from finished work" },
+];
+const KIND_CHIP: Record<string, string> = {
+  fact: "Fact", preference: "Preference", procedure: "Procedure", episode: "Episode", glossary: "Glossary", lesson: "Lesson",
+};
+
+function timeAgo(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `${d}d ago` : new Date(ts).toLocaleDateString();
+}
+
 function MemoryCard({ entry, reviewable }: { entry: MemoryEntry; reviewable: boolean }) {
   const { state, dispatch } = useStore();
   const notice = useNotice();
-  const author = state.roster[entry.provenance.author];
   const review = async (accept: boolean) => {
     try {
       await api(state.token, "POST", `/api/memory/${entry.id}/review`, { accept });
@@ -751,15 +775,23 @@ function MemoryCard({ entry, reviewable }: { entry: MemoryEntry; reviewable: boo
       notice(err);
     }
   };
+  const source = entry.source ?? "agent";
+  const provenance =
+    source === "connector"
+      ? state.connectors[entry.provenance.author]?.name ?? "connector"
+      : state.roster[entry.provenance.author]?.name ?? entry.provenance.author;
   return (
     <div className="card mem-card">
       <div className="card-text">{entry.content}</div>
       <div className="mem-meta mono">
-        <span className="tag">{entry.scope}</span>
-        <span className="tag">{entry.kind}</span>
+        <span className="tag">{KIND_CHIP[entry.kind] ?? entry.kind}</span>
+        <span className={`chip chip-src-${source}`}>
+          {source === "connector" ? "synced" : source === "human" ? "human-written" : "agent-learned"}
+        </span>
+        {entry.teamId && <span className="chip">{state.teams[entry.teamId]?.name ?? "team"}</span>}
         <span className={`tag tag-tier-${entry.trustTier}`}>{TIER_LABEL[entry.trustTier] ?? entry.trustTier}</span>
+        <span className="mem-when">{timeAgo(entry.ts)} · {provenance}</span>
       </div>
-      <div className="card-foot mono">by {author?.name ?? entry.provenance.author} · session {entry.provenance.sessionRef.slice(0, 8)}</div>
       {reviewable && (
         <div className="card-actions">
           <button className="btn btn-primary" onClick={() => review(true)}>Accept</button>
@@ -776,9 +808,19 @@ const SCOPE_TABS = [
   { key: "personal", label: "Personal" },
 ] as const;
 
+const SOURCE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "connector", label: "Synced" },
+  { key: "agent", label: "Agent-learned" },
+  { key: "human", label: "Human" },
+] as const;
+
 function MemoryView() {
   const { state } = useStore();
   const [scope, setScope] = useState<"org" | "space" | "personal">("org");
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "connector" | "agent" | "human">("all");
+  const [teamFilter, setTeamFilter] = useState<string>("all");
   const entries = Object.values(state.memory).filter((m) => m.status === "active");
   // Only what AGENTS claim to have learned needs a human's yes. Connector
   // syncs and human notes are trusted at the source.
@@ -786,13 +828,35 @@ function MemoryView() {
     (m) => (m.source ?? "agent") === "agent" && (m.trustTier === "quarantined" || m.trustTier === "agent_proposed"),
   );
   const accepted = entries.filter((m) => m.trustTier === "human_confirmed" || m.trustTier === "org_ratified");
-  const inScope = accepted.filter((m) => m.scope === scope);
-  const teamName = (id?: string) => (id ? state.teams[id]?.name ?? "team" : null);
+  const q = query.trim().toLowerCase();
+  const filtered = accepted
+    .filter((m) => m.scope === scope)
+    .filter((m) => sourceFilter === "all" || (m.source ?? "agent") === sourceFilter)
+    .filter((m) => scope !== "space" || teamFilter === "all" || m.teamId === teamFilter)
+    .filter((m) => q === "" || m.content.toLowerCase().includes(q));
+  // Teams the viewer can see (any team the server sent us).
+  const teams = Object.values(state.teams);
   return (
     <Page
       title="Memory"
-      sub="Three shelves: organization, team, personal. Agent proposals wait for your approval; connector-synced facts arrive pre-trusted."
+      sub="Three shelves: organization, team, personal — broken down by category. Agent proposals wait for your approval; connector-synced facts arrive pre-trusted."
     >
+      <div className="stat-row">
+        <div className="card stat-card stat-mini">
+          <div className="stat-value serif">{accepted.length}</div>
+          <div className="stat-label mono">accepted</div>
+        </div>
+        {SCOPE_TABS.map((t) => (
+          <div key={t.key} className="card stat-card stat-mini">
+            <div className="stat-value serif">{accepted.filter((m) => m.scope === t.key).length}</div>
+            <div className="stat-label mono">{t.label.toLowerCase()}</div>
+          </div>
+        ))}
+        <div className="card stat-card stat-mini">
+          <div className="stat-value serif">{queue.length}</div>
+          <div className="stat-label mono">pending review</div>
+        </div>
+      </div>
       <div className="section-title mono">AGENT PROPOSALS AWAITING YOUR REVIEW ({queue.length})</div>
       {queue.length === 0 && <div className="empty-state"><p>No agent proposals waiting. Connector syncs never appear here — they are trusted at the source.</p></div>}
       {queue.map((m) => (
@@ -806,18 +870,62 @@ function MemoryView() {
           </button>
         ))}
       </div>
-      {inScope.length === 0 && <div className="empty-state"><p>Nothing on this shelf yet.</p></div>}
-      {inScope.map((m) => (
-        <div key={m.id} className="mem-wrap">
-          <MemoryCard entry={m} reviewable={false} />
-          <div className="mem-source mono">
-            <span className={`chip chip-src-${m.source ?? "agent"}`}>
-              {m.source === "connector" ? `synced · ${state.connectors[m.provenance.author]?.name ?? "connector"}` : m.source === "human" ? "human-written" : "agent-learned"}
-            </span>
-            {m.teamId && <span className="chip">{teamName(m.teamId)}</span>}
-          </div>
+      <div className="mem-filters">
+        <input
+          className="mem-search"
+          placeholder="Search memory…"
+          aria-label="Search memory"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <div className="mem-filter-chips">
+          {SOURCE_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              className={`chip chip-filter ${sourceFilter === f.key ? "chip-filter-active" : ""}`}
+              onClick={() => setSourceFilter(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
-      ))}
+        {scope === "space" && teams.length > 0 && (
+          <div className="mem-filter-chips">
+            <button
+              className={`chip chip-filter ${teamFilter === "all" ? "chip-filter-active" : ""}`}
+              onClick={() => setTeamFilter("all")}
+            >
+              All teams
+            </button>
+            {teams.map((t) => (
+              <button
+                key={t.id}
+                className={`chip chip-filter ${teamFilter === t.id ? "chip-filter-active" : ""}`}
+                onClick={() => setTeamFilter(t.id)}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {filtered.length === 0 && <div className="empty-state"><p>Nothing on this shelf{q || sourceFilter !== "all" || teamFilter !== "all" ? " matches these filters" : " yet"}.</p></div>}
+      {KIND_META.map(({ kind, label, explain }) => {
+        const group = filtered.filter((m) => m.kind === kind).sort((a, b) => b.ts - a.ts);
+        if (group.length === 0) return null;
+        return (
+          <div key={kind} className="mem-category">
+            <div className="mem-cat-head">
+              <span className="mem-cat-label">{label}</span>
+              <span className="mem-cat-count mono">{group.length}</span>
+              <span className="mem-cat-explain">{explain}</span>
+            </div>
+            {group.map((m) => (
+              <MemoryCard key={m.id} entry={m} reviewable={false} />
+            ))}
+          </div>
+        );
+      })}
     </Page>
   );
 }

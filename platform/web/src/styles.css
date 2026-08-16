@@ -609,6 +609,39 @@ textarea { resize: vertical; }
 .admin-row select { margin-left: auto; }
 .dm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 3px; }
 .dm-list { margin-bottom: 6px; }
+/* W9 refined memory view */
+.stat-mini { padding: 10px 12px; }
+.stat-mini .stat-value { font-size: 20px; }
+.mem-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0 10px; }
+.mem-search {
+  flex: 1 1 200px;
+  min-width: 160px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.mem-search:focus { outline: none; border-color: var(--accent); }
+.mem-filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-filter { cursor: pointer; font-family: inherit; }
+.chip-filter:hover { border-color: var(--accent); }
+.chip-filter-active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.mem-category { margin-bottom: 14px; }
+.mem-cat-head { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 6px; }
+.mem-cat-label { font-weight: 600; font-size: 13px; }
+.mem-cat-count {
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.mem-cat-explain { color: var(--fg-faint); font-size: 12px; }
+.mem-when { color: var(--fg-faint); font-size: 11px; margin-left: 2px; }
+.mem-card .mem-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 8px 0 0; }
+
 .mem-wrap { display: flex; flex-direction: column; gap: 4px; }
 .mem-source { display: flex; gap: 6px; padding-left: 4px; }
 .chip-src-connector { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
