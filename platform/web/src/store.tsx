@@ -16,8 +16,14 @@ import type {
   AtriumEvent,
   Channel,
   DataRow,
+  GoalRecord,
+  InboxItem,
   MemoryEntry,
+  PipelineRun,
+  QuestionRecord,
   RoutineRecord,
+  TemplateRecord,
+  TurnCost,
   User,
 } from "../../shared/contracts.ts";
 
@@ -27,6 +33,7 @@ export type FeedItem =
   | { t: "msg"; eventId: string; authorId: string; ts: number; text: string }
   | { t: "chip"; eventId: string; authorId: string; ts: number; text: string }
   | { t: "approval"; eventId: string; approvalId: string; ts: number }
+  | { t: "question"; eventId: string; questionId: string; ts: number }
   | { t: "plan"; eventId: string; authorId: string; ts: number; plan: string[]; sql_like: string; resultPreview: DataRow[] };
 
 export type PendingTurn = { turnId: string; agentId: string; text: string; channelId: string };
@@ -51,6 +58,12 @@ export type State = {
   memory: Record<string, MemoryEntry>;
   approvals: Record<string, Approval>;
   routines: Record<string, RoutineRecord>;
+  inbox: Record<string, InboxItem>;
+  questions: Record<string, QuestionRecord>;
+  goals: Record<string, GoalRecord>;
+  templates: Record<string, TemplateRecord>;
+  pipelines: Record<string, PipelineRun>;
+  costs: TurnCost[];
   feeds: Record<string, FeedItem[]>;
   pendingTurns: Record<string, PendingTurn>;
   sandboxEvents: SandboxEvent[];
@@ -68,6 +81,12 @@ export const initialState: State = {
   memory: {},
   approvals: {},
   routines: {},
+  inbox: {},
+  questions: {},
+  goals: {},
+  templates: {},
+  pipelines: {},
+  costs: [],
   feeds: {},
   pendingTurns: {},
   sandboxEvents: [],
@@ -83,6 +102,12 @@ export type StateSnapshot = {
   memory: MemoryEntry[];
   approvals: Approval[];
   routines: RoutineRecord[];
+  inbox?: InboxItem[];
+  questions?: QuestionRecord[];
+  goals?: GoalRecord[];
+  templates?: TemplateRecord[];
+  pipelines?: PipelineRun[];
+  costs?: TurnCost[];
   transcripts: Record<
     string,
     Array<{
@@ -200,6 +225,73 @@ function foldEvent(state: State, ev: AtriumEvent): State {
           resultPreview: body.resultPreview,
         }),
       };
+    case EventKind.InboxPosted:
+      return { ...state, inbox: { ...state.inbox, [body.item.id]: body.item } };
+    case EventKind.InboxReplied: {
+      const item = state.inbox[body.itemId];
+      if (!item) return state;
+      return { ...state, inbox: { ...state.inbox, [body.itemId]: { ...item, status: "replied", reply: body.reply } } };
+    }
+    case EventKind.QuestionAsked:
+      return {
+        ...state,
+        questions: { ...state.questions, [body.question.id]: body.question },
+        feeds: pushFeed(state.feeds, ch, { t: "question", eventId: ev.id, questionId: body.question.id, ts: ev.ts }),
+      };
+    case EventKind.QuestionAnswered: {
+      const q = state.questions[body.questionId];
+      if (!q) return state;
+      return { ...state, questions: { ...state.questions, [body.questionId]: { ...q, status: "answered", answer: body.answer } } };
+    }
+    case EventKind.GoalCreated:
+      return { ...state, goals: { ...state.goals, [body.goal.id]: body.goal } };
+    case EventKind.GoalSessionCompleted: {
+      const g = state.goals[body.goalId];
+      if (!g) return state;
+      return { ...state, goals: { ...state.goals, [body.goalId]: { ...g, sessions: body.session, spentUsd: body.spentUsd } } };
+    }
+    case EventKind.GoalCriterionChecked: {
+      const g = state.goals[body.goalId];
+      if (!g) return state;
+      const criteria = g.criteria.map((c) => (c.id === body.criterionId ? { ...c, done: true } : c));
+      return { ...state, goals: { ...state.goals, [body.goalId]: { ...g, criteria } } };
+    }
+    case EventKind.GoalCompleted: {
+      const g = state.goals[body.goalId];
+      if (!g) return state;
+      return { ...state, goals: { ...state.goals, [body.goalId]: { ...g, status: "done" } } };
+    }
+    case EventKind.GoalHalted: {
+      const g = state.goals[body.goalId];
+      if (!g) return state;
+      return { ...state, goals: { ...state.goals, [body.goalId]: { ...g, status: "halted", haltReason: body.reason } } };
+    }
+    case EventKind.TemplateCreated:
+      return { ...state, templates: { ...state.templates, [body.template.id]: body.template } };
+    case EventKind.PipelineStarted:
+      return { ...state, pipelines: { ...state.pipelines, [body.run.id]: body.run } };
+    case EventKind.PipelineStepStarted: {
+      const run = state.pipelines[body.runId];
+      if (!run) return state;
+      const stepStates = run.stepStates.map((s, i) => (i === body.stepIndex ? ("running" as const) : s));
+      return { ...state, pipelines: { ...state.pipelines, [body.runId]: { ...run, stepIndex: body.stepIndex, stepStates } } };
+    }
+    case EventKind.PipelineStepCompleted: {
+      const run = state.pipelines[body.runId];
+      if (!run) return state;
+      const stepStates = run.stepStates.map((s, i) =>
+        i === body.stepIndex ? (body.gated ? ("awaiting_approval" as const) : ("done" as const)) : s,
+      );
+      return { ...state, pipelines: { ...state.pipelines, [body.runId]: { ...run, stepStates } } };
+    }
+    case EventKind.PipelineCompleted: {
+      const run = state.pipelines[body.runId];
+      if (!run) return state;
+      return { ...state, pipelines: { ...state.pipelines, [body.runId]: { ...run, status: "done" } } };
+    }
+    case EventKind.TurnCostRecorded:
+      if (state.costs.some((c) => c.turnId === body.cost.turnId)) return state;
+      return { ...state, costs: [...state.costs, body.cost] };
     case EventKind.RoutineCreated:
       return { ...state, routines: { ...state.routines, [body.routine.id]: body.routine } };
     case EventKind.RoutineRunCompleted: {
@@ -227,6 +319,16 @@ export function reducer(state: State, action: Action): State {
       for (const ap of action.snap.approvals) approvals[ap.id] = ap;
       const routines: Record<string, RoutineRecord> = {};
       for (const r of action.snap.routines ?? []) routines[r.id] = r;
+      const inbox: Record<string, InboxItem> = {};
+      for (const i of action.snap.inbox ?? []) inbox[i.id] = i;
+      const questions: Record<string, QuestionRecord> = {};
+      for (const q of action.snap.questions ?? []) questions[q.id] = q;
+      const goals: Record<string, GoalRecord> = {};
+      for (const g of action.snap.goals ?? []) goals[g.id] = g;
+      const templates: Record<string, TemplateRecord> = {};
+      for (const t of action.snap.templates ?? []) templates[t.id] = t;
+      const pipelines: Record<string, PipelineRun> = {};
+      for (const p of action.snap.pipelines ?? []) pipelines[p.id] = p;
       const feeds: Record<string, FeedItem[]> = {};
       for (const [chId, items] of Object.entries(action.snap.transcripts)) {
         feeds[chId] = items.map((i): FeedItem => {
@@ -252,7 +354,22 @@ export function reducer(state: State, action: Action): State {
         list.push({ t: "approval", eventId: `approval-${ap.id}`, approvalId: ap.id, ts: Date.now() });
         feeds[ap.channelId] = list;
       }
-      return { ...state, channels: action.snap.channels, roster, agents, memory, approvals, routines, feeds };
+      return {
+        ...state,
+        channels: action.snap.channels,
+        roster,
+        agents,
+        memory,
+        approvals,
+        routines,
+        inbox,
+        questions,
+        goals,
+        templates,
+        pipelines,
+        costs: action.snap.costs ?? [],
+        feeds,
+      };
     }
     case "select-channel":
       return { ...state, currentChannelId: action.channelId };

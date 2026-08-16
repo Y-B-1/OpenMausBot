@@ -24,10 +24,21 @@ Branch: `claude/hybrid-ai-platform-planning-upe28l` (all work lands here).
 2026-08-16 (local session): work moved to owner's Mac at
 `~/Documents/Claude/AgentOS/OpenMausBot`; buzz reference clone alongside.
 Postma AgentOS video studied → `docs/platform/research/agentos-video-study.md`
-(gap list: inbox/AskUser, goal loops + guardrails, pipeline templates,
-egress allowlists, files-MCP, YAML+CLI sync, librarian, costs) and BINDING
-design direction: UI = type.com × OpenMausBot cross (doc §4 has the rules —
-indigo accent replaces teal, light-first warm ground, OMB motion set).
+(gap list + BINDING design direction §4: UI = type.com × OpenMausBot cross).
+WAVE 6 SHIPPED (this session): the full gap list is implemented in
+`platform/` — inbox + blocking ask_user (kinds 80-83), goal loops with hard
+guardrails (spend/session/wall-clock/stuck, kinds 90-95), pipeline templates
+with approval gates (kinds 100-104), per-agent egress allowlist (fail-closed)
++ policy files (write/read, no delete, kinds 110-111), per-turn cost ledger
+(kind 120), YAML export (`/api/export`). UI fully redesigned to the §4 cross
+(light=type.com, dark=OMB stack, indigo accent, serif titles, OMB motion) with
+new sidebar IA: Inbox/Channels/Goals/Pipelines/Costs/Memory/Computer.
+Evidence: 42 tests green; live e2e exercised (question answered → goals
+done+halted → pipeline gate approved → done); screenshots
+`platform/web/screenshot-w6-*-{light,dark}.png`. Dev needs Node 22
+(`nvm use 22`) for `--experimental-strip-types`.
+NEXT: real Anthropic-driver trial of goal/pipeline prompts; then E2B
+SandboxProvider, multi-org, SSO, Composio connectors.
 
 ## Baselines
 
