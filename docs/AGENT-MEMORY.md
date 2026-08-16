@@ -37,8 +37,16 @@ Evidence: 42 tests green; live e2e exercised (question answered → goals
 done+halted → pipeline gate approved → done); screenshots
 `platform/web/screenshot-w6-*-{light,dark}.png`. Dev needs Node 22
 (`nvm use 22`) for `--experimental-strip-types`.
-NEXT: real Anthropic-driver trial of goal/pipeline prompts; then E2B
-SandboxProvider, multi-org, SSO, Composio connectors.
+WAVE 8 (ralph run, 2026-08-17): DEPLOYABLE BAR MET — verify-all.sh green:
+59 vitest, prod build, one-command smoke (relay serves web/dist, `pnpm
+start`), scrypt passwords + persisted sessions (restart-safe), /api/import,
+spaces grouping, /api/audit + Admin Audit tab, and scripts/e2e-demo.mjs — a
+14-assert full-surface browser walkthrough (chat/DM/inbox-question/goal/
+board/pipeline-gate/connector-sync→memory/promote/costs/audit) — E2E OK.
+Ralph harness state in repo-root loop-state.json (git-excluded).
+NEXT (BACKLOG.md): E6 self-review + doc surface, chat status chips, PWA
+push, real connector OAuth (owner creds), foundry/openai_compat driver
+impls, live Managed-Agents validation (owner ANTHROPIC_API_KEY).
 
 ## Baselines
 
