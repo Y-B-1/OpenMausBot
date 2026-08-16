@@ -71,7 +71,7 @@ Update it every iteration; mark DONE with commit hashes.
 - [ ] `foundry` driver (@anthropic-ai/foundry-sdk) + generic OpenAI-compat
       driver for Grok/DeepSeek-class models. Key entry UI in Admin →
       Providers (keys stored server-side .env, never client).
-- [x] (pending2) Provider status page (Admin → Model providers): key presence, driver gating, .env.example + loader. Model-picker constraint still open.
+- [x] (fc13a94) Provider status page (Admin → Model providers): key presence, driver gating, .env.example + loader. Model-picker constraint still open.
 
 ### E6 — type.com learnings beyond shared brain
 - [ ] Spaces as bundles: a Space = channels + connectors + skills + memory
