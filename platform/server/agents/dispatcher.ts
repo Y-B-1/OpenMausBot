@@ -8,6 +8,7 @@ import { EventKind } from "../../shared/contracts.ts";
 import { onEvent, type Relay } from "../relay.ts";
 import type { AgentDriver, ToolDef, ToolResult } from "./driver.ts";
 import { MockDriver } from "./mock.ts";
+import { runDataQuery } from "./dataset.ts";
 import { buildProposal, injectableMemory, wrapDataBlock } from "./memory-gates.ts";
 import { LocalSandboxProvider, type SandboxProvider } from "./sandbox.ts";
 
@@ -35,6 +36,15 @@ export const TOOL_DEFS: ToolDef[] = [
         content: { type: "string" },
       },
       required: ["content"],
+    },
+  },
+  {
+    name: "data_query",
+    description: "Plan-then-execute a question over the bundled finance dataset; the plan is audited.",
+    inputSchema: {
+      type: "object",
+      properties: { question: { type: "string" } },
+      required: ["question"],
     },
   },
 ];
@@ -171,6 +181,21 @@ export function createDispatcher(relay: Relay, options: DispatcherOptions = {}):
               });
               relay.emitEvent(agent.id, { kind: EventKind.MemoryProposed, entry }, channelId);
               return { ok: true, output: entry.id };
+            }
+            if (tool === "data_query") {
+              const q = runDataQuery(String(args["question"] ?? ""));
+              relay.emitEvent(
+                agent.id,
+                {
+                  kind: EventKind.PlanExecuted,
+                  agentId: agent.id,
+                  plan: q.plan,
+                  sql_like: q.sql_like,
+                  resultPreview: q.result.slice(0, 10),
+                },
+                channelId,
+              );
+              return { ok: true, output: q.summary };
             }
             if (tool === "sandbox_exec") return runSandboxExec(agent, channelId, args);
             return { ok: false, output: `unknown tool: ${tool}` };

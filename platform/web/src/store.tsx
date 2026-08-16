@@ -15,7 +15,9 @@ import type {
   Approval,
   AtriumEvent,
   Channel,
+  DataRow,
   MemoryEntry,
+  RoutineRecord,
   User,
 } from "../../shared/contracts.ts";
 
@@ -24,7 +26,8 @@ import type {
 export type FeedItem =
   | { t: "msg"; eventId: string; authorId: string; ts: number; text: string }
   | { t: "chip"; eventId: string; authorId: string; ts: number; text: string }
-  | { t: "approval"; eventId: string; approvalId: string; ts: number };
+  | { t: "approval"; eventId: string; approvalId: string; ts: number }
+  | { t: "plan"; eventId: string; authorId: string; ts: number; plan: string[]; sql_like: string; resultPreview: DataRow[] };
 
 export type PendingTurn = { turnId: string; agentId: string; text: string; channelId: string };
 
@@ -47,6 +50,7 @@ export type State = {
   agents: Record<string, AgentRecord>;
   memory: Record<string, MemoryEntry>;
   approvals: Record<string, Approval>;
+  routines: Record<string, RoutineRecord>;
   feeds: Record<string, FeedItem[]>;
   pendingTurns: Record<string, PendingTurn>;
   sandboxEvents: SandboxEvent[];
@@ -63,6 +67,7 @@ export const initialState: State = {
   agents: {},
   memory: {},
   approvals: {},
+  routines: {},
   feeds: {},
   pendingTurns: {},
   sandboxEvents: [],
@@ -77,9 +82,17 @@ export type StateSnapshot = {
   agents: AgentRecord[];
   memory: MemoryEntry[];
   approvals: Approval[];
+  routines: RoutineRecord[];
   transcripts: Record<
     string,
-    Array<{ eventId: string; authorId: string; ts: number; type: "message" | "chip"; text: string }>
+    Array<{
+      eventId: string;
+      authorId: string;
+      ts: number;
+      type: "message" | "chip" | "plan";
+      text: string;
+      plan?: { plan: string[]; sql_like: string; resultPreview: DataRow[] };
+    }>
   >;
 };
 
@@ -93,6 +106,7 @@ export type Action =
   // Local fold: kind-41/42 are emitted server-side without a channelId, so
   // they never fan out over WS — apply the review outcome after the POST.
   | { a: "memory-reviewed"; entryId: string; accepted: boolean }
+  | { a: "routine-created"; routine: RoutineRecord }
   | { a: "notice"; text: string | null };
 
 function pushFeed(feeds: Record<string, FeedItem[]>, channelId: string, item: FeedItem): Record<string, FeedItem[]> {
@@ -173,6 +187,26 @@ function foldEvent(state: State, ev: AtriumEvent): State {
           { eventId: ev.id, agentId: body.agentId, argv: body.argv, exitCode: body.exitCode, stdout: body.stdout, ts: ev.ts },
         ],
       };
+    case EventKind.PlanExecuted:
+      return {
+        ...state,
+        feeds: pushFeed(state.feeds, ch, {
+          t: "plan",
+          eventId: ev.id,
+          authorId: ev.authorId,
+          ts: ev.ts,
+          plan: body.plan,
+          sql_like: body.sql_like,
+          resultPreview: body.resultPreview,
+        }),
+      };
+    case EventKind.RoutineCreated:
+      return { ...state, routines: { ...state.routines, [body.routine.id]: body.routine } };
+    case EventKind.RoutineRunCompleted: {
+      const routine = state.routines[body.routineId];
+      if (!routine) return state;
+      return { ...state, routines: { ...state.routines, [body.routineId]: { ...routine, lastRunAt: body.ranAt } } };
+    }
     default:
       return state;
   }
@@ -191,13 +225,26 @@ export function reducer(state: State, action: Action): State {
       for (const m of action.snap.memory) memory[m.id] = m;
       const approvals: Record<string, Approval> = {};
       for (const ap of action.snap.approvals) approvals[ap.id] = ap;
+      const routines: Record<string, RoutineRecord> = {};
+      for (const r of action.snap.routines ?? []) routines[r.id] = r;
       const feeds: Record<string, FeedItem[]> = {};
       for (const [chId, items] of Object.entries(action.snap.transcripts)) {
-        feeds[chId] = items.map((i) =>
-          i.type === "message"
+        feeds[chId] = items.map((i): FeedItem => {
+          if (i.type === "plan" && i.plan) {
+            return {
+              t: "plan",
+              eventId: i.eventId,
+              authorId: i.authorId,
+              ts: i.ts,
+              plan: i.plan.plan,
+              sql_like: i.plan.sql_like,
+              resultPreview: i.plan.resultPreview,
+            };
+          }
+          return i.type === "message"
             ? { t: "msg", eventId: i.eventId, authorId: i.authorId, ts: i.ts, text: i.text }
-            : { t: "chip", eventId: i.eventId, authorId: i.authorId, ts: i.ts, text: i.text },
-        );
+            : { t: "chip", eventId: i.eventId, authorId: i.authorId, ts: i.ts, text: i.text };
+        });
       }
       // Surface pre-existing approval cards at the end of their channel feeds.
       for (const ap of action.snap.approvals) {
@@ -205,7 +252,7 @@ export function reducer(state: State, action: Action): State {
         list.push({ t: "approval", eventId: `approval-${ap.id}`, approvalId: ap.id, ts: Date.now() });
         feeds[ap.channelId] = list;
       }
-      return { ...state, channels: action.snap.channels, roster, agents, memory, approvals, feeds };
+      return { ...state, channels: action.snap.channels, roster, agents, memory, approvals, routines, feeds };
     }
     case "select-channel":
       return { ...state, currentChannelId: action.channelId };
@@ -230,6 +277,8 @@ export function reducer(state: State, action: Action): State {
         : { ...entry, status: "retired" as const };
       return { ...state, memory: { ...state.memory, [action.entryId]: updated } };
     }
+    case "routine-created":
+      return { ...state, routines: { ...state.routines, [action.routine.id]: action.routine } };
     case "notice":
       return { ...state, notice: action.text };
   }

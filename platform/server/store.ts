@@ -6,7 +6,9 @@ import type {
   Approval,
   AtriumEvent,
   Channel,
+  DataRow,
   MemoryEntry,
+  RoutineRecord,
   User,
 } from "../shared/contracts.ts";
 import { EventKind } from "../shared/contracts.ts";
@@ -52,9 +54,11 @@ export type TranscriptItem = {
   eventId: string;
   authorId: string;
   ts: number;
-  /** "message" for kind-1, "chip" for agent turn start/complete markers. */
-  type: "message" | "chip";
+  /** "message" for kind-1, "chip" for agent turn start/complete markers, "plan" for kind-61 query plans. */
+  type: "message" | "chip" | "plan";
   text: string;
+  /** Present on type "plan" only (Wave 5, T18). */
+  plan?: { plan: string[]; sql_like: string; resultPreview: DataRow[] };
 };
 
 /** In-memory projections, rebuilt fully from the log on boot. */
@@ -67,6 +71,7 @@ export class Projections {
   /** Channel a memory entry was proposed in, so review outcomes can fan out there. */
   memoryChannel = new Map<string, string>();
   approvals = new Map<string, Approval>();
+  routines = new Map<string, RoutineRecord>();
 
   rebuild(store: EventStore, org: string): void {
     this.channels.clear();
@@ -75,6 +80,7 @@ export class Projections {
     this.transcripts.clear();
     this.memory.clear();
     this.approvals.clear();
+    this.routines.clear();
     for (const ev of store.replay(org)) this.fold(ev);
   }
 
@@ -134,15 +140,37 @@ export class Projections {
         if (m) m.status = "retired";
         break;
       }
+      case EventKind.PlanExecuted:
+        this.pushTranscript(ev, "plan", body.sql_like, {
+          plan: body.plan,
+          sql_like: body.sql_like,
+          resultPreview: body.resultPreview,
+        });
+        break;
+      case EventKind.RoutineCreated:
+        this.routines.set(body.routine.id, { ...body.routine });
+        break;
+      case EventKind.RoutineRunCompleted: {
+        const r = this.routines.get(body.routineId);
+        if (r) r.lastRunAt = body.ranAt;
+        break;
+      }
       default:
         break; // reactions, sandbox audit, notes: not projected yet (Wave 2+)
     }
   }
 
-  private pushTranscript(ev: AtriumEvent, type: TranscriptItem["type"], text: string): void {
+  private pushTranscript(
+    ev: AtriumEvent,
+    type: TranscriptItem["type"],
+    text: string,
+    plan?: TranscriptItem["plan"],
+  ): void {
     if (!ev.channelId) return;
     const list = this.transcripts.get(ev.channelId) ?? [];
-    list.push({ eventId: ev.id, authorId: ev.authorId, ts: ev.ts, type, text });
+    const item: TranscriptItem = { eventId: ev.id, authorId: ev.authorId, ts: ev.ts, type, text };
+    if (plan) item.plan = plan;
+    list.push(item);
     this.transcripts.set(ev.channelId, list);
   }
 

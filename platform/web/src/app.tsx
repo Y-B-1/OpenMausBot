@@ -1,6 +1,6 @@
 // Atrium web UI (T10–T13): app shell, chat, approvals, memory review, computer panel.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { AgentRecord, Approval, Channel, MemoryEntry, User } from "../../shared/contracts.ts";
+import type { AgentRecord, Approval, Channel, MemoryEntry, RoutineRecord, User } from "../../shared/contracts.ts";
 import { api, useStore, type FeedItem, type PendingTurn, type StateSnapshot } from "./store.tsx";
 
 // ---------- Small pieces ----------
@@ -179,6 +179,7 @@ function Roster({ channel }: { channel: Channel }) {
         </select>
         <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>Add agent</button>
       </form>
+      <RoutinesSection channel={channel} />
     </aside>
   );
 }
@@ -213,6 +214,117 @@ function ApprovalCard({ approval }: { approval: Approval }) {
       ) : (
         <div className="approval-outcome mono">resolved · {approval.status}</div>
       )}
+    </div>
+  );
+}
+
+// ---------- Query plan card (T18: visibly inspectable plan-then-execute) ----------
+
+function PlanCard({ item }: { item: Extract<FeedItem, { t: "plan" }> }) {
+  const { state } = useStore();
+  const agent = state.agents[item.authorId];
+  const cols = item.resultPreview.length > 0 ? Object.keys(item.resultPreview[0]!) : [];
+  return (
+    <div className="plan-card" data-testid="plan-card">
+      <div className="plan-head mono">
+        QUERY PLAN · kind 61 · {agent?.name ?? item.authorId}
+      </div>
+      <ol className="plan-steps">
+        {item.plan.map((step, i) => (
+          <li key={i}>{step.replace(/^\d+\.\s*/, "")}</li>
+        ))}
+      </ol>
+      <div className="plan-sql mono">{item.sql_like}</div>
+      {cols.length > 0 && (
+        <table className="plan-table mono">
+          <thead>
+            <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+          </thead>
+          <tbody>
+            {item.resultPreview.map((row, i) => (
+              <tr key={i}>{cols.map((c) => <td key={c}>{typeof row[c] === "number" ? (row[c] as number).toLocaleString("en-US") : row[c]}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ---------- Routines (T17) ----------
+
+function RoutinesSection({ channel }: { channel: Channel }) {
+  const { state, dispatch } = useStore();
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [minutes, setMinutes] = useState("60");
+  const routines = Object.values(state.routines).filter((r) => r.channelId === channel.id);
+  const channelAgents = channel.memberIds.map((id) => state.agents[id]).filter((a): a is AgentRecord => !!a);
+
+  const runNow = async (routine: RoutineRecord) => {
+    try {
+      await api(state.token, "POST", `/api/routines/${routine.id}/run`);
+    } catch (err) {
+      dispatch({ a: "notice", text: String(err instanceof Error ? err.message : err) });
+    }
+  };
+
+  const create = async (e: FormEvent) => {
+    e.preventDefault();
+    const agent = agentId || channelAgents[0]?.id;
+    if (!name.trim() || !prompt.trim() || !agent) return;
+    try {
+      const { routine } = await api<{ routine: RoutineRecord }>(state.token, "POST", "/api/routines", {
+        name: name.trim(),
+        agentId: agent,
+        channelId: channel.id,
+        prompt: prompt.trim(),
+        schedule: minutes === "manual" ? { kind: "manual" } : { kind: "interval", minutes: Number(minutes) },
+      });
+      dispatch({ a: "routine-created", routine });
+      setName("");
+      setPrompt("");
+    } catch (err) {
+      dispatch({ a: "notice", text: String(err instanceof Error ? err.message : err) });
+    }
+  };
+
+  return (
+    <div className="routines" data-testid="routines-section">
+      <div className="panel-title mono panel-title-gap">ROUTINES · {routines.length}</div>
+      {routines.length === 0 && <div className="panel-empty">No routines in this channel.</div>}
+      {routines.map((r) => (
+        <div key={r.id} className="routine-card">
+          <div className="routine-name">{r.name}</div>
+          <div className="routine-meta mono">
+            @{state.agents[r.agentId]?.name ?? r.agentId} ·{" "}
+            {r.schedule.kind === "interval" ? `every ${r.schedule.minutes}m` : "manual"}
+          </div>
+          <div className="routine-meta mono">
+            last run: {r.lastRunAt ? new Date(r.lastRunAt).toLocaleString() : "never"}
+          </div>
+          <button className="btn btn-ghost routine-run" onClick={() => runNow(r)}>Run now</button>
+        </div>
+      ))}
+      <form className="routine-form" onSubmit={create}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Routine name" aria-label="Routine name" />
+        <input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Prompt for the agent" aria-label="Routine prompt" />
+        <select value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label="Routine agent">
+          {channelAgents.map((a) => (
+            <option key={a.id} value={a.id}>@{a.name}</option>
+          ))}
+        </select>
+        <select value={minutes} onChange={(e) => setMinutes(e.target.value)} aria-label="Routine schedule">
+          <option value="manual">manual</option>
+          <option value="60">every 60m</option>
+          <option value="1440">daily</option>
+          <option value="10080">weekly</option>
+        </select>
+        <button type="submit" className="btn btn-primary" disabled={!name.trim() || !prompt.trim() || channelAgents.length === 0}>
+          Create routine
+        </button>
+      </form>
     </div>
   );
 }
@@ -285,6 +397,7 @@ function FeedRow({ item }: { item: FeedItem }) {
     const ap = state.approvals[item.approvalId];
     return ap ? <ApprovalCard approval={ap} /> : null;
   }
+  if (item.t === "plan") return <PlanCard item={item} />;
   const author = state.roster[item.authorId];
   const agent = state.agents[item.authorId];
   if (item.t === "chip") {

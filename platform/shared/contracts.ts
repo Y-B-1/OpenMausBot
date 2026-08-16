@@ -17,6 +17,12 @@ export const EventKind = {
   MemoryRejected: 42,
   SandboxExec: 50,
   AuditNote: 60,
+  /** Wave 5 (T18): a data_query tool call executed a query plan. */
+  PlanExecuted: 61,
+  /** Wave 5 (T17): routines. */
+  RoutineCreated: 70,
+  RoutineRunStarted: 71,
+  RoutineRunCompleted: 72,
 } as const;
 
 export type EventKindValue = (typeof EventKind)[keyof typeof EventKind];
@@ -70,6 +76,22 @@ export type MemoryEntry = {
   ts: number;
 };
 
+/** Wave 5 (T17): a scheduled or manually-triggered prompt aimed at one agent in one channel. */
+export type RoutineSchedule = { kind: "interval"; minutes: number } | { kind: "manual" };
+
+export type RoutineRecord = {
+  id: string;
+  name: string;
+  agentId: string;
+  channelId: string;
+  prompt: string;
+  schedule: RoutineSchedule;
+  lastRunAt?: number;
+};
+
+/** Wave 5 (T18): result rows from the deterministic data engine. */
+export type DataRow = Record<string, string | number>;
+
 export type ApprovalStatus = "pending" | "approved" | "denied";
 
 export type Approval = {
@@ -97,6 +119,16 @@ export type MemoryAcceptedBody = { kind: typeof EventKind.MemoryAccepted; entryI
 export type MemoryRejectedBody = { kind: typeof EventKind.MemoryRejected; entryId: string; by: string };
 export type SandboxExecBody = { kind: typeof EventKind.SandboxExec; agentId: string; argv: string[]; exitCode: number; stdout: string };
 export type AuditNoteBody = { kind: typeof EventKind.AuditNote; note: string };
+export type PlanExecutedBody = {
+  kind: typeof EventKind.PlanExecuted;
+  agentId: string;
+  plan: string[];
+  sql_like: string;
+  resultPreview: DataRow[];
+};
+export type RoutineCreatedBody = { kind: typeof EventKind.RoutineCreated; routine: RoutineRecord };
+export type RoutineRunStartedBody = { kind: typeof EventKind.RoutineRunStarted; routineId: string };
+export type RoutineRunCompletedBody = { kind: typeof EventKind.RoutineRunCompleted; routineId: string; ranAt: number };
 
 export type EventBody =
   | MessageBody
@@ -112,7 +144,11 @@ export type EventBody =
   | MemoryAcceptedBody
   | MemoryRejectedBody
   | SandboxExecBody
-  | AuditNoteBody;
+  | AuditNoteBody
+  | PlanExecutedBody
+  | RoutineCreatedBody
+  | RoutineRunStartedBody
+  | RoutineRunCompletedBody;
 
 export type AtriumEvent = {
   id: string;

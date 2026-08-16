@@ -5,6 +5,7 @@
   "scripts": {
     "check": "tsc --noEmit && vitest run",
     "dev": "node --experimental-strip-types server/main.ts",
+    "seed": "node --experimental-strip-types server/seed.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts"
   },

@@ -10,6 +10,8 @@ import type {
   Channel,
   EventBody,
   ModelPolicy,
+  RoutineRecord,
+  RoutineSchedule,
   User,
 } from "../shared/contracts.ts";
 import { EventKind } from "../shared/contracts.ts";
@@ -48,6 +50,8 @@ export type Relay = {
   projections: Projections;
   /** Inject an event through the full pipeline (append → fan-out → fold → hooks). Wave 2 seam. */
   emitEvent: (authorId: string, body: EventBody, channelId?: string, opts?: { ephemeral?: boolean }) => AtriumEvent;
+  /** Wave 5 (T17): run all due interval routines now. Called every 30s by the internal timer; exported as a test seam. */
+  tickRoutines: () => void;
 };
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -109,6 +113,36 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
     return ev;
   };
 
+  // ---- Wave 5 (T17): routines ----
+  const ROUTINE_USER: User = { id: "routine", name: "Routine", kind: "human" };
+  const ensureRoutineUser = (): void => {
+    if (!projections.users.has(ROUTINE_USER.id)) {
+      emit(newEvent("acme", ROUTINE_USER.id, { kind: EventKind.MemberAdded, userId: ROUTINE_USER.id, user: ROUTINE_USER }));
+    }
+  };
+
+  /** Fire one routine: kind 71, a synthetic @mention message (the existing dispatch pipeline does the rest), kind 72. */
+  const runRoutine = (routine: RoutineRecord): void => {
+    const agent = projections.agents.get(routine.agentId);
+    if (!agent) return;
+    ensureRoutineUser();
+    const ranAt = Date.now();
+    emit(newEvent("acme", ROUTINE_USER.id, { kind: EventKind.RoutineRunStarted, routineId: routine.id }, routine.channelId));
+    emit(newEvent("acme", ROUTINE_USER.id, { kind: EventKind.Message, text: `@${agent.name} ${routine.prompt}` }, routine.channelId));
+    emit(newEvent("acme", ROUTINE_USER.id, { kind: EventKind.RoutineRunCompleted, routineId: routine.id, ranAt }, routine.channelId));
+  };
+
+  const tickRoutines = (): void => {
+    const now = Date.now();
+    for (const routine of projections.routines.values()) {
+      if (routine.schedule.kind !== "interval") continue;
+      const due = routine.lastRunAt === undefined || now - routine.lastRunAt >= routine.schedule.minutes * 60_000;
+      if (due) runRoutine(routine);
+    }
+  };
+  const routineTimer = setInterval(tickRoutines, 30_000);
+  routineTimer.unref();
+
   const server = http.createServer((req, res) => {
     void (async () => {
       let org: string;
@@ -153,6 +187,7 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
             agents: [...projections.agents.values()],
             memory: [...projections.memory.values()],
             approvals: [...projections.approvals.values()],
+            routines: [...projections.routines.values()],
             transcripts: Object.fromEntries(channels.map((c) => [c.id, projections.transcripts.get(c.id) ?? []])),
           });
         }
@@ -241,6 +276,35 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           return json(res, 200, { ok: true, accepted: accept });
         }
 
+        // POST /api/routines {name, agentId, channelId, prompt, schedule}
+        if (method === "POST" && url.pathname === "/api/routines") {
+          const body = await readBody(req);
+          const name = String(body["name"] ?? "").trim();
+          const agentId = String(body["agentId"] ?? "");
+          const channelId = String(body["channelId"] ?? "");
+          const prompt = String(body["prompt"] ?? "").trim();
+          if (!name || !prompt) return json(res, 400, { error: "name and prompt required" });
+          if (!projections.agents.has(agentId)) return json(res, 404, { error: "unknown agent" });
+          if (!isMember(channelId, userId)) return json(res, 403, { error: "not a member" });
+          const rawSchedule = (body["schedule"] ?? {}) as Partial<{ kind: string; minutes: number }>;
+          const schedule: RoutineSchedule =
+            rawSchedule.kind === "interval"
+              ? { kind: "interval", minutes: Math.max(0, Number(rawSchedule.minutes ?? 60)) }
+              : { kind: "manual" };
+          const routine: RoutineRecord = { id: crypto.randomUUID(), name, agentId, channelId, prompt, schedule };
+          emit(newEvent(org, userId, { kind: EventKind.RoutineCreated, routine }, channelId));
+          return json(res, 200, { routine });
+        }
+
+        // POST /api/routines/:id/run — manual trigger
+        if (method === "POST" && parts[0] === "api" && parts[1] === "routines" && parts[3] === "run" && parts.length === 4) {
+          const routine = projections.routines.get(parts[2]!);
+          if (!routine) return json(res, 404, { error: "unknown routine" });
+          if (!isMember(routine.channelId, userId)) return json(res, 403, { error: "not a member" });
+          runRoutine(routine);
+          return json(res, 200, { ok: true });
+        }
+
         return json(res, 404, { error: "not found" });
       } catch (err) {
         return json(res, 500, { error: String(err) });
@@ -304,6 +368,7 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
 
   const close = (): Promise<void> =>
     new Promise((resolve) => {
+      clearInterval(routineTimer);
       for (const sub of subs) sub.ws.terminate();
       wss.close();
       server.close(() => resolve());
@@ -315,5 +380,5 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
     return ev;
   };
 
-  return { server, listen, close, store, projections, emitEvent };
+  return { server, listen, close, store, projections, emitEvent, tickRoutines };
 }

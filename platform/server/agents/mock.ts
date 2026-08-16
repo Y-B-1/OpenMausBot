@@ -13,6 +13,15 @@ export class MockDriver implements AgentDriver {
     const last = [...input.transcript].reverse().find((t) => t.text.trim() !== "");
     const lastText = last?.text ?? "";
 
+    // T18: finance-analyst agents (data_query allowed) answer revenue/numbers
+    // questions through the plan-then-execute engine.
+    if (input.agent.allowTools.includes("data_query") && /revenue|numbers/i.test(lastText)) {
+      const result = await callbacks.onToolCall("data_query", { question: lastText });
+      const text = result.ok ? result.output : `Data query failed: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+
     if (/compute/i.test(lastText)) {
       const result = await callbacks.onToolCall("sandbox_exec", {
         argv: ["node", "-e", "console.log(6*7)"],
