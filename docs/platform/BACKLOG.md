@@ -104,6 +104,14 @@ Update it every iteration; mark DONE with commit hashes.
       no service worker — push proper needs infra we don't have).
 - [x] (76b99fc) Live walkthrough available at any time via `pnpm demo`
       (requires `pnpm start` first; friendly error otherwise).
+- [x] (7092602) Cohesive story seed: `pnpm demo` now tells one "Acme Digital"
+      story across EVERY surface — 4 humans / 3 teams / 4 agents / 7 rooms +
+      DMs, every mock behavior triggered (plan card, approval flow with one
+      approved + one pending compute, egress allow+deny, files, remember →
+      accept/pending/quarantine → recall, open inbox item, pending + answered
+      questions), 3 done + 1 halted goal, 1 done + 2 gated pipeline runs,
+      2 routines, connector-kind memory diversity; hard-verified end-to-end
+      by scripts/demo-verify.mjs (28 PASS asserts on an ephemeral stack).
 
 ## Buzz notes (owner's questions answered — keep for reference)
 
