@@ -26,7 +26,7 @@ Update it every iteration; mark DONE with commit hashes.
 - [ ] Cross-room flow: promote a chat thread → goal/pipeline; goal events
       link back to source channel; inbox items deep-link to their room.
 - [ ] Group chat polish: typing/turn indicators, agent status chips.
-- [x] (pending3) Task board view (Board nav): todo/doing/needs-you/done columns from goals+pipelines, cards deep-link.
+- [x] (312def4) Task board view (Board nav): todo/doing/needs-you/done columns from goals+pipelines, cards deep-link.
 
 ### E2 — Connectors (the owner's memory vision)
 - [x] (044c8d9) Connector registry: record = {provider (microsoft365, sharepoint,
