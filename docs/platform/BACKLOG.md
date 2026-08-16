@@ -76,8 +76,9 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (fc13a94) Provider status page (Admin → Model providers): key presence, driver gating, .env.example + loader. Model-picker constraint still open.
 
 ### E6 — type.com learnings beyond shared brain
-- [ ] Spaces as bundles: a Space = channels + connectors + skills + memory
-      partition an agent inherits on entry (our `space` field, promoted).
+- [x] (77fc4f4) Spaces as bundles (lite): sidebar space heading opens a
+      SpaceView bundle page — channels, viewer-visible connectors, team-shelf
+      memory. Agent-inherits-on-entry (skills, auto-context) still open.
 - [x] (707dbc4) Import-from-local onboarding: /api/import accepts {claudeMd}
       and seeds a mock "Repo Assistant" agent from the doc head (first 2000
       chars as persona). Skills ingestion still open if ever needed.
