@@ -89,7 +89,7 @@ function Login() {
 
 // ---------- Sidebar ----------
 
-type View = "inbox" | "channels" | "goals" | "pipelines" | "costs" | "memory" | "computer" | "admin";
+type View = "inbox" | "channels" | "board" | "goals" | "pipelines" | "costs" | "memory" | "computer" | "admin";
 
 function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) {
   const { state, dispatch } = useStore();
@@ -138,6 +138,7 @@ function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) 
       <div className="nav">
         <NavItem v="inbox" label="Inbox" badge={openInbox} />
         <NavItem v="channels" label="Channels" />
+        <NavItem v="board" label="Board" />
         <NavItem v="goals" label="Goals" badge={runningGoals} />
         <NavItem v="pipelines" label="Pipelines" badge={gatedRuns} />
         <NavItem v="costs" label="Costs" />
@@ -582,6 +583,56 @@ function PipelinesView() {
       {runs.map((r) => (
         <PipelineCard key={r.id} run={r} />
       ))}
+    </Page>
+  );
+}
+
+// ---------- Board view (E1): everything in flight, kanban-style ----------
+
+type BoardCard = { id: string; title: string; kind: "goal" | "pipeline"; meta: string };
+
+function BoardView({ goTo }: { goTo: (v: View) => void }) {
+  const { state } = useStore();
+  const cards: Record<"todo" | "doing" | "review" | "done", BoardCard[]> = { todo: [], doing: [], review: [], done: [] };
+  for (const g of Object.values(state.goals)) {
+    const done = g.criteria.filter((c) => c.done).length;
+    const card: BoardCard = { id: g.id, title: g.name, kind: "goal", meta: `${done}/${g.criteria.length} criteria · $${g.spentUsd.toFixed(4)}` };
+    if (g.status === "done") cards.done.push(card);
+    else if (g.status === "halted") cards.review.push({ ...card, meta: `halted: ${g.haltReason ?? "needs attention"}` });
+    else if (g.sessions === 0) cards.todo.push(card);
+    else cards.doing.push(card);
+  }
+  for (const p of Object.values(state.pipelines)) {
+    const template = state.templates[p.templateId];
+    const step = template?.steps[p.stepIndex]?.title ?? "";
+    const card: BoardCard = { id: p.id, title: p.name, kind: "pipeline", meta: step ? `step: ${step}` : "" };
+    if (p.status === "done") cards.done.push(card);
+    else if (p.stepStates.includes("awaiting_approval")) cards.review.push({ ...card, meta: `waiting for your approval · ${step}` });
+    else cards.doing.push(card);
+  }
+  const COLS = [
+    { key: "todo", label: "To do" },
+    { key: "doing", label: "Doing" },
+    { key: "review", label: "Needs you" },
+    { key: "done", label: "Done" },
+  ] as const;
+  return (
+    <Page title="Board" sub="Everything in flight, at a glance. 'Needs you' is the only column that can't move without you.">
+      <div className="board">
+        {COLS.map((col) => (
+          <div key={col.key} className="board-col">
+            <div className="board-col-title mono">{col.label} · {cards[col.key].length}</div>
+            {cards[col.key].map((c) => (
+              <button key={c.id} className="board-card" onClick={() => goTo(c.kind === "goal" ? "goals" : "pipelines")}>
+                <span className={`chip ${c.kind === "goal" ? "chip-question" : "chip-gate"}`}>{c.kind}</span>
+                <span className="board-card-title">{c.title}</span>
+                <span className="board-card-meta mono">{c.meta}</span>
+              </button>
+            ))}
+            {cards[col.key].length === 0 && <div className="panel-empty">Empty.</div>}
+          </div>
+        ))}
+      </div>
     </Page>
   );
 }
@@ -1344,6 +1395,7 @@ function Shell() {
         )}
         <div className="shell-body">
           {view === "inbox" && <InboxView />}
+          {view === "board" && <BoardView goTo={setView} />}
           {view === "goals" && <GoalsView />}
           {view === "pipelines" && <PipelinesView />}
           {view === "costs" && <CostsView />}
