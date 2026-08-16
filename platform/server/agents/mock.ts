@@ -72,7 +72,7 @@ export class MockDriver implements AgentDriver {
       callbacks.onDelta(text);
       return { text };
     }
-    const saveMatch = /save file (\S+)\s*[:]?\s*(.*)/i.exec(lastText);
+    const saveMatch = /save file ([^\s:]+):?\s*(.*)/i.exec(lastText);
     if (saveMatch) {
       const result = await callbacks.onToolCall("files_write", { name: saveMatch[1], content: saveMatch[2] || "empty" });
       const text = result.ok ? `Saved ${saveMatch[1]}.` : `File write failed: ${result.output}`;

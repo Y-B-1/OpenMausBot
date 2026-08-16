@@ -230,6 +230,20 @@ describe("import (W8)", () => {
     expect((JSON.parse(memberRes.text) as { files: unknown[] }).files.length).toBe(1);
   });
 
+  it("mock save-file: a trailing colon after the filename is not part of the name", async () => {
+    const { dispatcher, base } = await bootWithEngines();
+    const admin = await login(base, "Yosri");
+    const { data: chData } = await post(base, admin.token, "/api/channels", { name: "docs", space: "general" });
+    const ch = (chData["channel"] as { id: string }).id;
+    await post(base, admin.token, "/api/agents", { name: "Scribe", channelId: ch });
+    await post(base, admin.token, `/api/channels/${ch}/messages`, { text: "@Scribe save file notes.md: hello world" });
+    await dispatcher.idle(ch);
+    const res = await get(base, admin.token, "/api/files");
+    const { files } = JSON.parse(res.text) as { files: Array<{ name: string }> };
+    expect(files.length).toBe(1);
+    expect(files[0]!.name).toBe("notes.md");
+  });
+
   it("import is admin-only: non-admin gets 403", async () => {
     const { base } = await boot();
     await login(base, "Yosri"); // first human becomes admin
