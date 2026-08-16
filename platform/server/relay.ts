@@ -259,7 +259,7 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           const name = String(body["name"] ?? "").trim();
           if (!name) return json(res, 400, { error: "name required" });
           const rawDriver = String(body["driver"] ?? "mock");
-          const driver = (["anthropic", "foundry", "openai_compat"] as const).find((d) => d === rawDriver) ?? "mock";
+          const driver = (["anthropic", "managed", "foundry", "openai_compat"] as const).find((d) => d === rawDriver) ?? "mock";
           const mp = (body["modelPolicy"] ?? {}) as Partial<ModelPolicy>;
           const agentUser: User = { id: crypto.randomUUID(), name, kind: "agent" };
           const agent: AgentRecord = {

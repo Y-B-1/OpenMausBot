@@ -62,9 +62,7 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (05b8360) Memory search: `memory_search` agent tool + team walls (passesTeamWall/searchMemory in memory-gates).
 
 ### E5 — Engine room: Managed Agents + Agent SDK + Foundry option
-- [ ] `managed` driver: run a work agent as a CMA session (agents.create
-      once, sessions per task, budgets = our guardrails, outcomes = our
-      goals). Blocked on ANTHROPIC_API_KEY.
+- [x] (pending5) `managed` driver SCAFFOLD: CMA agent-per-Atrium-agent cache, session-per-turn with initial_events + $5 budget cap, event polling to idle. Live validation still blocked on ANTHROPIC_API_KEY.
 - [ ] `agent-sdk` runner: local worker executing Claude Agent SDK sessions
       for repo work; events mirrored into channels.
 - [ ] `foundry` driver (@anthropic-ai/foundry-sdk) + generic OpenAI-compat

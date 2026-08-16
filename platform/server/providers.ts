@@ -45,6 +45,7 @@ export function providerStatuses(env: NodeJS.ProcessEnv = process.env): Provider
 export const DRIVER_PROVIDER: Record<string, ProviderStatus["id"] | null> = {
   mock: null,
   anthropic: "anthropic",
+  managed: "anthropic",
   foundry: "foundry",
   openai_compat: "openai_compat",
 };

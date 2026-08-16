@@ -115,7 +115,7 @@ export type AgentRecord = {
   id: string;
   name: string;
   persona: string;
-  driver: "mock" | "anthropic" | "foundry" | "openai_compat";
+  driver: "mock" | "anthropic" | "managed" | "foundry" | "openai_compat";
   modelPolicy: ModelPolicy;
   allowTools: string[];
   environment?: AgentEnvironment;

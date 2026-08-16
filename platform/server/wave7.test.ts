@@ -211,6 +211,14 @@ describe("providers (E5)", () => {
   });
 });
 
+describe("managed driver scaffold (E5)", () => {
+  it("factory returns null without a key and a driver with one", async () => {
+    const { createManagedDriver } = await import("./agents/managed.ts");
+    expect(createManagedDriver({} as NodeJS.ProcessEnv)).toBeNull();
+    expect(createManagedDriver({ ANTHROPIC_API_KEY: "sk-test" } as unknown as NodeJS.ProcessEnv)).not.toBeNull();
+  });
+});
+
 describe("DMs (E1)", () => {
   it("find-or-create returns the same 1:1 channel on repeat calls", async () => {
     const { base } = await boot();

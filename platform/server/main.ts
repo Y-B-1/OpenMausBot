@@ -13,6 +13,7 @@ if (fs.existsSync(envFile)) {
 }
 import { createDispatcher } from "./agents/dispatcher.ts";
 import { createEngines } from "./agents/engines.ts";
+import { createManagedDriver } from "./agents/managed.ts";
 import { createAnthropicDriver } from "./agents/anthropic.ts";
 import { MockDriver } from "./agents/mock.ts";
 
@@ -21,8 +22,13 @@ const relay = createRelay();
 // Wave 2: agent dispatcher registered via the relay onEvent hook.
 const mock = new MockDriver();
 const anthropic = createAnthropicDriver(); // null unless ANTHROPIC_API_KEY is set
+const managed = createManagedDriver(); // null unless ANTHROPIC_API_KEY is set
 const dispatcher = createDispatcher(relay, {
-  driverFor: (agent) => (agent.driver === "anthropic" && anthropic ? anthropic : mock),
+  driverFor: (agent) => {
+    if (agent.driver === "anthropic" && anthropic) return anthropic;
+    if (agent.driver === "managed" && managed) return managed;
+    return mock; // missing keys degrade to mock, never crash
+  },
 });
 
 // Wave 6: goal + pipeline engines react to GoalCreated / PipelineStarted events.
