@@ -46,6 +46,14 @@ export const EventKind = {
   EgressDenied: 111,
   /** Wave 6 (W6-E): per-turn cost estimate. */
   TurnCostRecorded: 120,
+  /** Wave 7 (E3): single-org RBAC — roles + teams. */
+  TeamCreated: 130,
+  TeamMemberAdded: 131,
+  RoleChanged: 132,
+  /** Wave 7 (E2): connectors — org systems feeding memory and agent tools. */
+  ConnectorCreated: 140,
+  ConnectorUpdated: 141,
+  ConnectorSynced: 142,
 } as const;
 
 export type EventKindValue = (typeof EventKind)[keyof typeof EventKind];
@@ -54,10 +62,42 @@ export type EventKindValue = (typeof EventKind)[keyof typeof EventKind];
 
 export type UserKind = "human" | "agent";
 
+export type Role = "admin" | "member";
+
 export type User = {
   id: string;
   name: string;
   kind: UserKind;
+  /** W7: humans only; the first human to sign in becomes admin. */
+  role?: Role;
+};
+
+/** W7 (E3): a team inside the single org — the visibility unit for connectors and memory walls. */
+export type TeamRecord = {
+  id: string;
+  name: string;
+  memberIds: string[];
+};
+
+/** W7 (E2): a connector to an org system (M365, Atlassian, Databricks, …). */
+export type ConnectorKind = "memory" | "agent";
+export type ConnectorAccess = "read_only" | "write_no_delete";
+export type ConnectorScope = "org" | "team" | "user";
+
+export type ConnectorTool = { name: string; enabled: boolean };
+
+export type ConnectorRecord = {
+  id: string;
+  provider: string;
+  name: string;
+  kind: ConnectorKind;
+  status: "connected" | "disconnected";
+  accessLevel: ConnectorAccess;
+  tools: ConnectorTool[];
+  scope: ConnectorScope;
+  teamId?: string;
+  syncedCount: number;
+  lastSyncAt?: number;
 };
 
 export type ModelPolicy = {
@@ -93,6 +133,9 @@ export type MemoryKind = "fact" | "preference" | "procedure" | "episode" | "glos
 export type TrustTier = "quarantined" | "agent_proposed" | "human_confirmed" | "org_ratified";
 export type MemoryStatus = "active" | "superseded" | "retired";
 
+/** W7 (E4): where a memory came from. Agent proposals need human review; connector-synced and human-written entries do not. */
+export type MemorySource = "agent" | "connector" | "human";
+
 export type MemoryEntry = {
   id: string;
   scope: MemoryScope;
@@ -103,6 +146,10 @@ export type MemoryEntry = {
   status: MemoryStatus;
   supersedes?: string;
   ts: number;
+  /** W7: defaults to "agent" for entries created before this field existed. */
+  source?: MemorySource;
+  /** W7: team wall — set when scope is "space" (team). */
+  teamId?: string;
 };
 
 /** Wave 5 (T17): a scheduled or manually-triggered prompt aimed at one agent in one channel. */
@@ -271,6 +318,22 @@ export type PipelineCompletedBody = { kind: typeof EventKind.PipelineCompleted; 
 export type FileWrittenBody = { kind: typeof EventKind.FileWritten; agentId: string; name: string; bytes: number };
 export type EgressDeniedBody = { kind: typeof EventKind.EgressDenied; agentId: string; url: string };
 export type TurnCostRecordedBody = { kind: typeof EventKind.TurnCostRecorded; cost: TurnCost };
+export type TeamCreatedBody = { kind: typeof EventKind.TeamCreated; team: TeamRecord };
+export type TeamMemberAddedBody = { kind: typeof EventKind.TeamMemberAdded; teamId: string; userId: string };
+export type RoleChangedBody = { kind: typeof EventKind.RoleChanged; userId: string; role: Role; by: string };
+export type ConnectorCreatedBody = { kind: typeof EventKind.ConnectorCreated; connector: ConnectorRecord };
+export type ConnectorUpdatedBody = {
+  kind: typeof EventKind.ConnectorUpdated;
+  connectorId: string;
+  status?: "connected" | "disconnected";
+  tools?: ConnectorTool[];
+};
+export type ConnectorSyncedBody = {
+  kind: typeof EventKind.ConnectorSynced;
+  connectorId: string;
+  entries: MemoryEntry[];
+  ranAt: number;
+};
 
 export type EventBody =
   | MessageBody
@@ -308,7 +371,13 @@ export type EventBody =
   | PipelineCompletedBody
   | FileWrittenBody
   | EgressDeniedBody
-  | TurnCostRecordedBody;
+  | TurnCostRecordedBody
+  | TeamCreatedBody
+  | TeamMemberAddedBody
+  | RoleChangedBody
+  | ConnectorCreatedBody
+  | ConnectorUpdatedBody
+  | ConnectorSyncedBody;
 
 export type AtriumEvent = {
   id: string;

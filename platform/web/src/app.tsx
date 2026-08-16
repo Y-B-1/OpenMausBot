@@ -89,7 +89,7 @@ function Login() {
 
 // ---------- Sidebar ----------
 
-type View = "inbox" | "channels" | "goals" | "pipelines" | "costs" | "memory" | "computer";
+type View = "inbox" | "channels" | "goals" | "pipelines" | "costs" | "memory" | "computer" | "admin";
 
 function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) {
   const { state, dispatch } = useStore();
@@ -143,10 +143,34 @@ function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) 
         <NavItem v="costs" label="Costs" />
         <NavItem v="memory" label="Memory" badge={memQueue} />
         <NavItem v="computer" label="Computer" />
+        {state.me?.role === "admin" && <NavItem v="admin" label="Admin" />}
       </div>
+      <div className="rail-section-title mono">DIRECT MESSAGES</div>
+      <ul className="channel-list dm-list">
+        {Object.values(state.agents).map((a) => (
+          <li key={a.id}>
+            <button
+              className={`channel-item ${state.channels.find((c) => c.id === state.currentChannelId)?.space === "dm" && state.channels.find((c) => c.id === state.currentChannelId)?.name === a.name && view === "channels" ? "active" : ""}`}
+              onClick={async () => {
+                try {
+                  const { channel } = await api<{ channel: Channel }>(state.token, "POST", "/api/dm", { agentId: a.id });
+                  dispatch({ a: "channel-created", channel });
+                  dispatch({ a: "select-channel", channelId: channel.id });
+                  setView("channels");
+                } catch (err) {
+                  notice(err);
+                }
+              }}
+            >
+              <span className="dm-dot" /> {a.name}
+            </button>
+          </li>
+        ))}
+        {Object.keys(state.agents).length === 0 && <li className="rail-empty">No agents yet.</li>}
+      </ul>
       <div className="rail-section-title mono">CHANNELS</div>
       <ul className="channel-list">
-        {state.channels.map((c) => (
+        {state.channels.filter((c) => c.space !== "dm").map((c) => (
           <li key={c.id}>
             <button
               className={`channel-item ${state.currentChannelId === c.id && view === "channels" ? "active" : ""}`}
@@ -651,31 +675,230 @@ function MemoryCard({ entry, reviewable }: { entry: MemoryEntry; reviewable: boo
   );
 }
 
+const SCOPE_TABS = [
+  { key: "org", label: "Organization" },
+  { key: "space", label: "Team" },
+  { key: "personal", label: "Personal" },
+] as const;
+
 function MemoryView() {
   const { state } = useStore();
+  const [scope, setScope] = useState<"org" | "space" | "personal">("org");
   const entries = Object.values(state.memory).filter((m) => m.status === "active");
-  const queue = entries.filter((m) => m.trustTier === "quarantined" || m.trustTier === "agent_proposed");
+  // Only what AGENTS claim to have learned needs a human's yes. Connector
+  // syncs and human notes are trusted at the source.
+  const queue = entries.filter(
+    (m) => (m.source ?? "agent") === "agent" && (m.trustTier === "quarantined" || m.trustTier === "agent_proposed"),
+  );
   const accepted = entries.filter((m) => m.trustTier === "human_confirmed" || m.trustTier === "org_ratified");
+  const inScope = accepted.filter((m) => m.scope === scope);
+  const teamName = (id?: string) => (id ? state.teams[id]?.name ?? "team" : null);
   return (
-    <Page title="Memory" sub="Nothing an agent writes becomes truth until a human accepts it.">
-      <div className="section-title mono">REVIEW QUEUE ({queue.length})</div>
-      {queue.length === 0 && <div className="empty-state"><p>Nothing awaiting review.</p></div>}
+    <Page
+      title="Memory"
+      sub="Three shelves: organization, team, personal. Agent proposals wait for your approval; connector-synced facts arrive pre-trusted."
+    >
+      <div className="section-title mono">AGENT PROPOSALS AWAITING YOUR REVIEW ({queue.length})</div>
+      {queue.length === 0 && <div className="empty-state"><p>No agent proposals waiting. Connector syncs never appear here — they are trusted at the source.</p></div>}
       {queue.map((m) => (
         <MemoryCard key={m.id} entry={m} reviewable />
       ))}
-      <div className="section-title mono">ACCEPTED</div>
-      {(["org", "space", "personal"] as const).map((scope) => {
-        const list = accepted.filter((m) => m.scope === scope);
-        if (list.length === 0) return null;
-        return (
-          <div key={scope}>
-            <div className="mem-group-title mono">{scope} ({list.length})</div>
-            {list.map((m) => (
-              <MemoryCard key={m.id} entry={m} reviewable={false} />
+      <div className="section-title mono">ACCEPTED MEMORY</div>
+      <div className="tab-row">
+        {SCOPE_TABS.map((t) => (
+          <button key={t.key} className={`btn btn-option ${scope === t.key ? "tab-active" : ""}`} onClick={() => setScope(t.key)}>
+            {t.label} ({accepted.filter((m) => m.scope === t.key).length})
+          </button>
+        ))}
+      </div>
+      {inScope.length === 0 && <div className="empty-state"><p>Nothing on this shelf yet.</p></div>}
+      {inScope.map((m) => (
+        <div key={m.id} className="mem-wrap">
+          <MemoryCard entry={m} reviewable={false} />
+          <div className="mem-source mono">
+            <span className={`chip chip-src-${m.source ?? "agent"}`}>
+              {m.source === "connector" ? `synced · ${state.connectors[m.provenance.author]?.name ?? "connector"}` : m.source === "human" ? "human-written" : "agent-learned"}
+            </span>
+            {m.teamId && <span className="chip">{teamName(m.teamId)}</span>}
+          </div>
+        </div>
+      ))}
+    </Page>
+  );
+}
+
+// ---------- Admin view (E2/E3) ----------
+
+function AdminView() {
+  const { state } = useStore();
+  const notice = useNotice();
+  const [tab, setTab] = useState<"people" | "connectors">("people");
+  const [teamName, setTeamName] = useState("");
+  const [provider, setProvider] = useState("sharepoint");
+  const [kind, setKind] = useState<"memory" | "agent">("memory");
+  const [scope, setScope] = useState<"org" | "team">("org");
+  const [teamId, setTeamId] = useState("");
+  const humans = Object.values(state.roster).filter((u) => u.kind === "human" && u.id !== "routine" && u.id !== "orchestrator");
+  const teams = Object.values(state.teams);
+  const connectors = Object.values(state.connectors);
+
+  const call = async (path: string, body: unknown = {}) => {
+    try {
+      await api(state.token, "POST", path, body);
+    } catch (err) {
+      notice(err);
+    }
+  };
+
+  return (
+    <Page title="Admin" sub="People, teams, and the org's connectors. Only admins see this room.">
+      <div className="tab-row">
+        <button className={`btn btn-option ${tab === "people" ? "tab-active" : ""}`} onClick={() => setTab("people")}>People &amp; Teams</button>
+        <button className={`btn btn-option ${tab === "connectors" ? "tab-active" : ""}`} onClick={() => setTab("connectors")}>Connectors</button>
+      </div>
+
+      {tab === "people" && (
+        <>
+          <div className="card">
+            <div className="form-title mono">PEOPLE</div>
+            {humans.map((u) => (
+              <div key={u.id} className="admin-row">
+                <Avatar user={u} />
+                <span className="roster-name">{u.name}</span>
+                <span className={`chip ${u.role === "admin" ? "chip-question" : ""}`}>{u.role ?? "member"}</span>
+                {u.role !== "admin" && (
+                  <button className="btn btn-ghost" onClick={() => call(`/api/users/${u.id}/role`, { role: "admin" })}>
+                    Make admin
+                  </button>
+                )}
+              </div>
             ))}
           </div>
-        );
-      })}
+          <div className="card form-card">
+            <div className="form-title mono">TEAMS</div>
+            {teams.map((t) => (
+              <div key={t.id} className="admin-row">
+                <span className="goal-name">{t.name}</span>
+                <span className="chip">{t.memberIds.length} member{t.memberIds.length === 1 ? "" : "s"}</span>
+                <select
+                  aria-label={`Add member to ${t.name}`}
+                  value=""
+                  onChange={(e) => e.target.value && call(`/api/teams/${t.id}/members`, { userId: e.target.value })}
+                >
+                  <option value="">Add member…</option>
+                  {humans.filter((u) => !t.memberIds.includes(u.id)).map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            <form
+              className="inline-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (teamName.trim()) void call("/api/teams", { name: teamName.trim() }).then(() => setTeamName(""));
+              }}
+            >
+              <input value={teamName} onChange={(e) => setTeamName(e.target.value)} placeholder="New team name…" aria-label="New team" />
+              <button type="submit" className="btn btn-primary" disabled={!teamName.trim()}>Create team</button>
+            </form>
+          </div>
+        </>
+      )}
+
+      {tab === "connectors" && (
+        <>
+          <div className="card form-card">
+            <div className="form-title mono">ADD CONNECTOR</div>
+            <div className="form-grid">
+              <select value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="Provider">
+                {["sharepoint", "onedrive", "teams", "outlook", "confluence", "jira", "databricks", "github"].map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <select value={kind} onChange={(e) => setKind(e.target.value === "agent" ? "agent" : "memory")} aria-label="Connector kind">
+                <option value="memory">feeds memory (read-only)</option>
+                <option value="agent">agent tool (read / write-no-delete)</option>
+              </select>
+              <select value={scope} onChange={(e) => setScope(e.target.value === "team" ? "team" : "org")} aria-label="Connector scope">
+                <option value="org">whole organization</option>
+                <option value="team">one team</option>
+              </select>
+              {scope === "team" && (
+                <select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Connector team">
+                  <option value="">pick team…</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
+              <button
+                className="btn btn-cta"
+                onClick={() =>
+                  call("/api/connectors", {
+                    provider,
+                    kind,
+                    scope,
+                    ...(scope === "team" && teamId ? { teamId } : {}),
+                    ...(kind === "agent" ? { accessLevel: "write_no_delete" } : {}),
+                  })
+                }
+              >
+                Add
+              </button>
+            </div>
+          </div>
+          {connectors.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-title serif">No connectors yet</div>
+              <p>Connect SharePoint or Confluence to start filling the organization's memory.</p>
+            </div>
+          )}
+          {connectors.map((c) => (
+            <div key={c.id} className="card" data-testid="connector-card">
+              <div className="card-head">
+                <span className="goal-name">{c.name}</span>
+                <span className={`chip ${c.kind === "memory" ? "chip-question" : "chip-gate"}`}>{c.kind === "memory" ? "memory source" : "agent tool"}</span>
+                <span className="chip">{c.accessLevel === "read_only" ? "read-only" : "write, no delete"}</span>
+                <span className="chip">{c.scope === "team" ? `team · ${state.teams[c.teamId ?? ""]?.name ?? "?"}` : c.scope}</span>
+                <span className={`chip ${c.status === "connected" ? "chip-done" : "chip-status-halted"}`}>{c.status}</span>
+              </div>
+              <div className="option-row">
+                {c.tools.map((t) => (
+                  <button
+                    key={t.name}
+                    className={`btn btn-option tool-toggle ${t.enabled ? "tab-active" : "tool-off"}`}
+                    title={t.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
+                    onClick={() =>
+                      call(`/api/connectors/${c.id}`, {
+                        tools: c.tools.map((x) => (x.name === t.name ? { ...x, enabled: !x.enabled } : x)),
+                      })
+                    }
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+              <div className="card-actions">
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => call(`/api/connectors/${c.id}`, { status: c.status === "connected" ? "disconnected" : "connected" })}
+                >
+                  {c.status === "connected" ? "Disconnect" : "Connect"}
+                </button>
+                {c.kind === "memory" && (
+                  <button className="btn btn-primary" disabled={c.status !== "connected"} onClick={() => call(`/api/connectors/${c.id}/sync`)}>
+                    Sync now
+                  </button>
+                )}
+                <span className="card-foot mono">
+                  {c.syncedCount > 0 ? `${c.syncedCount} items in memory · last sync ${c.lastSyncAt ? new Date(c.lastSyncAt).toLocaleTimeString() : "—"}` : "nothing synced yet"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </Page>
   );
 }
@@ -1098,6 +1321,7 @@ function Shell() {
           {view === "costs" && <CostsView />}
           {view === "memory" && <MemoryView />}
           {view === "computer" && <ComputerView />}
+          {view === "admin" && <AdminView />}
           {view === "channels" &&
             (channel ? (
               <>

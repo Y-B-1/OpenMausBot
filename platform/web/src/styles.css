@@ -577,6 +577,23 @@ textarea { resize: vertical; }
   max-height: 140px;
 }
 
+/* ---------- W7: tabs, admin, DM, memory provenance ---------- */
+
+.tab-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tab-active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.tool-toggle { font-size: 12px; padding: 4px 12px; }
+.tool-off { opacity: 0.45; text-decoration: line-through; }
+.admin-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
+.admin-row:first-of-type { border-top: none; }
+.admin-row select { margin-left: auto; }
+.dm-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 3px; }
+.dm-list { margin-bottom: 6px; }
+.mem-wrap { display: flex; flex-direction: column; gap: 4px; }
+.mem-source { display: flex; gap: 6px; padding-left: 4px; }
+.chip-src-connector { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.chip-src-human { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.chip-src-agent { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+
 /* ---------- notice ---------- */
 
 .notice {

@@ -8,6 +8,8 @@ import type {
   AgentRecord,
   AtriumEvent,
   Channel,
+  ConnectorRecord,
+  ConnectorTool,
   EventBody,
   GoalGuardrails,
   GoalRecord,
@@ -15,6 +17,7 @@ import type {
   PipelineRun,
   RoutineRecord,
   RoutineSchedule,
+  TeamRecord,
   TemplateRecord,
   TemplateStep,
   User,
@@ -22,6 +25,7 @@ import type {
 import { EventKind } from "../shared/contracts.ts";
 import { EventStore, Projections } from "./store.ts";
 import { exportYaml } from "./yaml.ts";
+import { PROVIDER_CATALOG, defaultTools, providerInfo, syncItems } from "./connectors.ts";
 
 /** Tenancy seam (D4): single org, fail-closed. */
 export function resolveOrg(hostHeader: string | undefined): string {
@@ -168,7 +172,13 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
         if (!name) return json(res, 400, { error: "name required" });
         let user = [...projections.users.values()].find((u) => u.kind === "human" && u.name === name);
         if (!user) {
-          user = { id: crypto.randomUUID(), name, kind: "human" };
+          // W7: the first real human in the org is its admin. Synthetic
+          // actors (routine, orchestrator) never count.
+          const humans = [...projections.users.values()].filter(
+            (u) => u.kind === "human" && u.id !== "routine" && u.id !== "orchestrator",
+          );
+          const role = humans.length === 0 ? "admin" : "member";
+          user = { id: crypto.randomUUID(), name, kind: "human", role };
           emit(newEvent(org, user.id, { kind: EventKind.MemberAdded, userId: user.id, user }));
         }
         const token = crypto.randomBytes(24).toString("hex");
@@ -200,6 +210,9 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
             templates: [...projections.templates.values()],
             pipelines: [...projections.pipelines.values()],
             costs: projections.costs,
+            teams: [...projections.teams.values()],
+            connectors: [...projections.connectors.values()],
+            me: projections.users.get(userId) ?? null,
             transcripts: Object.fromEntries(channels.map((c) => [c.id, projections.transcripts.get(c.id) ?? []])),
           });
         }
@@ -318,6 +331,119 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           if (!isMember(routine.channelId, userId)) return json(res, 403, { error: "not a member" });
           runRoutine(routine);
           return json(res, 200, { ok: true });
+        }
+
+        // ---- Wave 7 routes (E2/E3): RBAC, teams, connectors, DMs ----
+        const isAdmin = projections.users.get(userId)?.role === "admin";
+
+        // POST /api/teams {name}
+        if (method === "POST" && url.pathname === "/api/teams") {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const body = await readBody(req);
+          const name = String(body["name"] ?? "").trim();
+          if (!name) return json(res, 400, { error: "name required" });
+          const team: TeamRecord = { id: crypto.randomUUID(), name, memberIds: [] };
+          emit(newEvent(org, userId, { kind: EventKind.TeamCreated, team }));
+          return json(res, 200, { team });
+        }
+
+        // POST /api/teams/:id/members {userId}
+        if (method === "POST" && parts[0] === "api" && parts[1] === "teams" && parts[3] === "members" && parts.length === 4) {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const team = projections.teams.get(parts[2]!);
+          if (!team) return json(res, 404, { error: "unknown team" });
+          const body = await readBody(req);
+          const memberId = String(body["userId"] ?? "");
+          if (!projections.users.has(memberId)) return json(res, 404, { error: "unknown user" });
+          emit(newEvent(org, userId, { kind: EventKind.TeamMemberAdded, teamId: team.id, userId: memberId }));
+          return json(res, 200, { ok: true });
+        }
+
+        // POST /api/users/:id/role {role}
+        if (method === "POST" && parts[0] === "api" && parts[1] === "users" && parts[3] === "role" && parts.length === 4) {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const target = projections.users.get(parts[2]!);
+          if (!target || target.kind !== "human") return json(res, 404, { error: "unknown user" });
+          const body = await readBody(req);
+          const role = body["role"] === "admin" ? "admin" : "member";
+          emit(newEvent(org, userId, { kind: EventKind.RoleChanged, userId: target.id, role, by: userId }));
+          return json(res, 200, { ok: true });
+        }
+
+        // GET /api/connectors/catalog
+        if (method === "GET" && url.pathname === "/api/connectors/catalog") {
+          return json(res, 200, { catalog: PROVIDER_CATALOG.map(({ provider, label, defaultTools: dt }) => ({ provider, label, defaultTools: dt })) });
+        }
+
+        // POST /api/connectors {provider, kind, accessLevel?, scope?, teamId?}
+        if (method === "POST" && url.pathname === "/api/connectors") {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const body = await readBody(req);
+          const provider = String(body["provider"] ?? "");
+          const info = providerInfo(provider);
+          if (!info) return json(res, 404, { error: "unknown provider" });
+          const connector: ConnectorRecord = {
+            id: crypto.randomUUID(),
+            provider,
+            name: info.label,
+            kind: body["kind"] === "memory" ? "memory" : "agent",
+            status: "disconnected",
+            accessLevel: body["accessLevel"] === "write_no_delete" ? "write_no_delete" : "read_only",
+            tools: defaultTools(provider),
+            scope: body["scope"] === "team" ? "team" : body["scope"] === "user" ? "user" : "org",
+            syncedCount: 0,
+          };
+          if (typeof body["teamId"] === "string" && body["teamId"]) connector.teamId = body["teamId"] as string;
+          // Memory connectors never write back — force read-only.
+          if (connector.kind === "memory") connector.accessLevel = "read_only";
+          emit(newEvent(org, userId, { kind: EventKind.ConnectorCreated, connector }));
+          return json(res, 200, { connector });
+        }
+
+        // POST /api/connectors/:id {status?, tools?}
+        if (method === "POST" && parts[0] === "api" && parts[1] === "connectors" && parts.length === 3) {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const connector = projections.connectors.get(parts[2]!);
+          if (!connector) return json(res, 404, { error: "unknown connector" });
+          const body = await readBody(req);
+          const patch: { status?: "connected" | "disconnected"; tools?: ConnectorTool[] } = {};
+          if (body["status"] === "connected" || body["status"] === "disconnected") patch.status = body["status"];
+          if (Array.isArray(body["tools"])) {
+            patch.tools = (body["tools"] as Array<Record<string, unknown>>).map((t) => ({
+              name: String(t["name"] ?? ""),
+              enabled: t["enabled"] === true,
+            }));
+          }
+          emit(newEvent(org, userId, { kind: EventKind.ConnectorUpdated, connectorId: connector.id, ...patch }));
+          return json(res, 200, { ok: true });
+        }
+
+        // POST /api/connectors/:id/sync — memory connectors only
+        if (method === "POST" && parts[0] === "api" && parts[1] === "connectors" && parts[3] === "sync" && parts.length === 4) {
+          if (!isAdmin) return json(res, 403, { error: "admin only" });
+          const connector = projections.connectors.get(parts[2]!);
+          if (!connector) return json(res, 404, { error: "unknown connector" });
+          if (connector.kind !== "memory") return json(res, 400, { error: "only memory connectors sync" });
+          if (connector.status !== "connected") return json(res, 409, { error: "connector is disconnected" });
+          const entries = syncItems(connector);
+          emit(newEvent(org, userId, { kind: EventKind.ConnectorSynced, connectorId: connector.id, entries, ranAt: Date.now() }));
+          return json(res, 200, { synced: entries.length });
+        }
+
+        // POST /api/dm {agentId} — find-or-create the 1:1 channel with an agent
+        if (method === "POST" && url.pathname === "/api/dm") {
+          const body = await readBody(req);
+          const agentId = String(body["agentId"] ?? "");
+          const agent = projections.agents.get(agentId);
+          if (!agent) return json(res, 404, { error: "unknown agent" });
+          const existing = [...projections.channels.values()].find(
+            (c) => c.space === "dm" && c.memberIds.length === 2 && c.memberIds.includes(userId) && c.memberIds.includes(agentId),
+          );
+          if (existing) return json(res, 200, { channel: existing, created: false });
+          const channel: Channel = { id: crypto.randomUUID(), name: agent.name, space: "dm", memberIds: [userId] };
+          emit(newEvent(org, userId, { kind: EventKind.ChannelCreated, channel }, channel.id));
+          emit(newEvent(org, userId, { kind: EventKind.MemberAdded, userId: agentId }, channel.id));
+          return json(res, 200, { channel: projections.channels.get(channel.id), created: true });
         }
 
         // ---- Wave 6 routes ----

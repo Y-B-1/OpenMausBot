@@ -6,6 +6,7 @@ import type {
   Approval,
   AtriumEvent,
   Channel,
+  ConnectorRecord,
   DataRow,
   GoalRecord,
   InboxItem,
@@ -13,6 +14,7 @@ import type {
   PipelineRun,
   QuestionRecord,
   RoutineRecord,
+  TeamRecord,
   TemplateRecord,
   TurnCost,
   User,
@@ -84,6 +86,8 @@ export class Projections {
   templates = new Map<string, TemplateRecord>();
   pipelines = new Map<string, PipelineRun>();
   costs: TurnCost[] = [];
+  teams = new Map<string, TeamRecord>();
+  connectors = new Map<string, ConnectorRecord>();
 
   rebuild(store: EventStore, org: string): void {
     this.channels.clear();
@@ -100,6 +104,8 @@ export class Projections {
     this.templates.clear();
     this.pipelines.clear();
     this.costs = [];
+    this.teams.clear();
+    this.connectors.clear();
     for (const ev of store.replay(org)) this.fold(ev);
   }
 
@@ -260,6 +266,42 @@ export class Projections {
       case EventKind.TurnCostRecorded:
         this.costs.push({ ...body.cost });
         break;
+      case EventKind.TeamCreated:
+        this.teams.set(body.team.id, { ...body.team, memberIds: [...body.team.memberIds] });
+        break;
+      case EventKind.TeamMemberAdded: {
+        const team = this.teams.get(body.teamId);
+        if (team && !team.memberIds.includes(body.userId)) team.memberIds.push(body.userId);
+        break;
+      }
+      case EventKind.RoleChanged: {
+        const user = this.users.get(body.userId);
+        if (user) user.role = body.role;
+        break;
+      }
+      case EventKind.ConnectorCreated:
+        this.connectors.set(body.connector.id, {
+          ...body.connector,
+          tools: body.connector.tools.map((t) => ({ ...t })),
+        });
+        break;
+      case EventKind.ConnectorUpdated: {
+        const c = this.connectors.get(body.connectorId);
+        if (c) {
+          if (body.status) c.status = body.status;
+          if (body.tools) c.tools = body.tools.map((t) => ({ ...t }));
+        }
+        break;
+      }
+      case EventKind.ConnectorSynced: {
+        const c = this.connectors.get(body.connectorId);
+        if (c) {
+          c.syncedCount += body.entries.length;
+          c.lastSyncAt = body.ranAt;
+        }
+        for (const entry of body.entries) this.memory.set(entry.id, { ...entry });
+        break;
+      }
       default:
         break; // reactions, sandbox audit, notes: not projected yet (Wave 2+)
     }

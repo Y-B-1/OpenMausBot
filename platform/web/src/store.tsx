@@ -15,6 +15,7 @@ import type {
   Approval,
   AtriumEvent,
   Channel,
+  ConnectorRecord,
   DataRow,
   GoalRecord,
   InboxItem,
@@ -22,6 +23,7 @@ import type {
   PipelineRun,
   QuestionRecord,
   RoutineRecord,
+  TeamRecord,
   TemplateRecord,
   TurnCost,
   User,
@@ -64,6 +66,8 @@ export type State = {
   templates: Record<string, TemplateRecord>;
   pipelines: Record<string, PipelineRun>;
   costs: TurnCost[];
+  teams: Record<string, TeamRecord>;
+  connectors: Record<string, ConnectorRecord>;
   feeds: Record<string, FeedItem[]>;
   pendingTurns: Record<string, PendingTurn>;
   sandboxEvents: SandboxEvent[];
@@ -87,6 +91,8 @@ export const initialState: State = {
   templates: {},
   pipelines: {},
   costs: [],
+  teams: {},
+  connectors: {},
   feeds: {},
   pendingTurns: {},
   sandboxEvents: [],
@@ -108,6 +114,9 @@ export type StateSnapshot = {
   templates?: TemplateRecord[];
   pipelines?: PipelineRun[];
   costs?: TurnCost[];
+  teams?: TeamRecord[];
+  connectors?: ConnectorRecord[];
+  me?: User | null;
   transcripts: Record<
     string,
     Array<{
@@ -292,6 +301,41 @@ function foldEvent(state: State, ev: AtriumEvent): State {
     case EventKind.TurnCostRecorded:
       if (state.costs.some((c) => c.turnId === body.cost.turnId)) return state;
       return { ...state, costs: [...state.costs, body.cost] };
+    case EventKind.TeamCreated:
+      return { ...state, teams: { ...state.teams, [body.team.id]: body.team } };
+    case EventKind.TeamMemberAdded: {
+      const team = state.teams[body.teamId];
+      if (!team || team.memberIds.includes(body.userId)) return state;
+      return { ...state, teams: { ...state.teams, [body.teamId]: { ...team, memberIds: [...team.memberIds, body.userId] } } };
+    }
+    case EventKind.RoleChanged: {
+      const user = state.roster[body.userId];
+      const roster = user ? { ...state.roster, [body.userId]: { ...user, role: body.role } } : state.roster;
+      const me = state.me?.id === body.userId ? { ...state.me, role: body.role } : state.me;
+      return { ...state, roster, me };
+    }
+    case EventKind.ConnectorCreated:
+      return { ...state, connectors: { ...state.connectors, [body.connector.id]: body.connector } };
+    case EventKind.ConnectorUpdated: {
+      const c = state.connectors[body.connectorId];
+      if (!c) return state;
+      return {
+        ...state,
+        connectors: {
+          ...state.connectors,
+          [body.connectorId]: { ...c, ...(body.status ? { status: body.status } : {}), ...(body.tools ? { tools: body.tools } : {}) },
+        },
+      };
+    }
+    case EventKind.ConnectorSynced: {
+      const c = state.connectors[body.connectorId];
+      const memory = { ...state.memory };
+      for (const entry of body.entries) memory[entry.id] = entry;
+      const connectors = c
+        ? { ...state.connectors, [body.connectorId]: { ...c, syncedCount: c.syncedCount + body.entries.length, lastSyncAt: body.ranAt } }
+        : state.connectors;
+      return { ...state, memory, connectors };
+    }
     case EventKind.RoutineCreated:
       return { ...state, routines: { ...state.routines, [body.routine.id]: body.routine } };
     case EventKind.RoutineRunCompleted: {
@@ -329,6 +373,10 @@ export function reducer(state: State, action: Action): State {
       for (const t of action.snap.templates ?? []) templates[t.id] = t;
       const pipelines: Record<string, PipelineRun> = {};
       for (const p of action.snap.pipelines ?? []) pipelines[p.id] = p;
+      const teams: Record<string, TeamRecord> = {};
+      for (const t of action.snap.teams ?? []) teams[t.id] = t;
+      const connectors: Record<string, ConnectorRecord> = {};
+      for (const c of action.snap.connectors ?? []) connectors[c.id] = c;
       const feeds: Record<string, FeedItem[]> = {};
       for (const [chId, items] of Object.entries(action.snap.transcripts)) {
         feeds[chId] = items.map((i): FeedItem => {
@@ -367,6 +415,9 @@ export function reducer(state: State, action: Action): State {
         goals,
         templates,
         pipelines,
+        teams,
+        connectors,
+        me: action.snap.me ?? state.me,
         costs: action.snap.costs ?? [],
         feeds,
       };
