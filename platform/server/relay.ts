@@ -299,7 +299,16 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
             pipelines: [...projections.pipelines.values()],
             costs: projections.costs,
             teams: [...projections.teams.values()],
-            connectors: [...projections.connectors.values()],
+            // E2: per-connector visibility — members only receive connectors
+            // that are org-scoped or scoped to one of their teams.
+            connectors: [...projections.connectors.values()].filter((c) => {
+              if (viewerIsAdmin || c.scope === "org") return true;
+              if (c.scope === "team" && c.teamId) {
+                const team = projections.teams.get(c.teamId);
+                return !!team && team.memberIds.includes(userId);
+              }
+              return false; // user-scoped (no owner field yet) and unteamed team-scope: fail closed
+            }),
             providers: providerStatuses(),
             me: projections.users.get(userId) ?? null,
             transcripts: Object.fromEntries(channels.map((c) => [c.id, projections.transcripts.get(c.id) ?? []])),

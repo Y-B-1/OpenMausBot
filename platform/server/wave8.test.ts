@@ -309,6 +309,24 @@ describe("import (W8)", () => {
     expect(after.filter((m) => m.scope === "org" && m.teamId === undefined).length).toBe(walled.length);
   });
 
+  it("connector visibility (E2): member receives org connectors and own-team connectors only; admin all", async () => {
+    const { base } = await boot();
+    const admin = await login(base, "Yosri");
+    const sara = await login(base, "Sara");
+    const legal = (await post(base, admin.token, "/api/teams", { name: "Legal" })).data["team"] as { id: string };
+    const eng = (await post(base, admin.token, "/api/teams", { name: "Eng" })).data["team"] as { id: string };
+    await post(base, admin.token, `/api/teams/${eng.id}/members`, { userId: sara.user.id });
+    await post(base, admin.token, "/api/connectors", { provider: "sharepoint", kind: "memory" }); // org
+    await post(base, admin.token, "/api/connectors", { provider: "jira", kind: "agent", scope: "team", teamId: legal.id });
+    await post(base, admin.token, "/api/connectors", { provider: "github", kind: "agent", scope: "team", teamId: eng.id });
+
+    const saraState = JSON.parse((await get(base, sara.token, "/api/state")).text) as { connectors: Array<{ provider: string }> };
+    expect(saraState.connectors.map((c) => c.provider).sort()).toEqual(["github", "sharepoint"]);
+
+    const adminState = JSON.parse((await get(base, admin.token, "/api/state")).text) as { connectors: unknown[] };
+    expect(adminState.connectors.length).toBe(3);
+  });
+
   it("import is admin-only: non-admin gets 403", async () => {
     const { base } = await boot();
     await login(base, "Yosri"); // first human becomes admin
