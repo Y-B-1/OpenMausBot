@@ -23,8 +23,7 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (044c8d9) DM surface: first-class "Direct messages" section (1 human + 1 agent
       channels auto-created per agent); DM quality ≥ upstream OpenMausBot
       chat (port its streaming/composer polish where better).
-- [ ] Cross-room flow: promote a chat thread → goal/pipeline; goal events
-      link back to source channel; inbox items deep-link to their room.
+- [x] (pending4) Cross-room flow: chat header 'Promote to goal' pre-selects the channel; inbox/question cards deep-link 'Open the room this came from'.
 - [ ] Group chat polish: typing/turn indicators, agent status chips.
 - [x] (312def4) Task board view (Board nav): todo/doing/needs-you/done columns from goals+pipelines, cards deep-link.
 

@@ -265,8 +265,13 @@ function QuestionCard({ question }: { question: QuestionRecord }) {
   );
 }
 
-function InboxView() {
-  const { state } = useStore();
+function InboxView({ goTo }: { goTo: (v: View) => void }) {
+  const { state, dispatch } = useStore();
+  const openRoom = (channelId?: string) => {
+    if (!channelId) return;
+    dispatch({ a: "select-channel", channelId });
+    goTo("channels");
+  };
   const notice = useNotice();
   const [replies, setReplies] = useState<Record<string, string>>({});
   const questions = Object.values(state.questions).sort((a, b) => (a.status === "pending" ? -1 : 1) - (b.status === "pending" ? -1 : 1));
@@ -292,7 +297,12 @@ function InboxView() {
         </div>
       )}
       {questions.map((q) => (
-        <QuestionCard key={q.id} question={q} />
+        <div key={q.id} className="mem-wrap">
+          <QuestionCard question={q} />
+          <div className="mem-source">
+            <button className="btn btn-ghost btn-open-room" onClick={() => openRoom(q.channelId)}>Open the room this came from →</button>
+          </div>
+        </div>
       ))}
       {items.map((item) => {
         const agent = state.agents[item.agentId];
@@ -323,6 +333,11 @@ function InboxView() {
               </form>
             ) : (
               <div className="card-foot mono">you replied · {item.reply}</div>
+            )}
+            {item.channelId && (
+              <div className="card-actions">
+                <button className="btn btn-ghost btn-open-room" onClick={() => openRoom(item.channelId)}>Open the room this came from →</button>
+              </div>
             )}
           </div>
         );
@@ -366,13 +381,13 @@ function GoalCard({ goal }: { goal: GoalRecord }) {
   );
 }
 
-function GoalsView() {
+function GoalsView({ initialChannelId }: { initialChannelId?: string | null }) {
   const { state } = useStore();
   const notice = useNotice();
   const [name, setName] = useState("");
   const [criteria, setCriteria] = useState("");
   const [agentId, setAgentId] = useState("");
-  const [channelId, setChannelId] = useState("");
+  const [channelId, setChannelId] = useState(initialChannelId ?? "");
   const [spendCap, setSpendCap] = useState("25");
   const [maxSessions, setMaxSessions] = useState("20");
   const [stuck, setStuck] = useState("3");
@@ -1345,7 +1360,7 @@ function RoutinesSection({ channel }: { channel: Channel }) {
   );
 }
 
-function ChatView({ channel }: { channel: Channel }) {
+function ChatView({ channel, onPromote }: { channel: Channel; onPromote?: () => void }) {
   const { state } = useStore();
   const feed = state.feeds[channel.id] ?? [];
   const pending = Object.values(state.pendingTurns).filter((t) => t.channelId === channel.id);
@@ -1357,8 +1372,13 @@ function ChatView({ channel }: { channel: Channel }) {
   return (
     <section className="chat">
       <header className="chat-head">
-        <h2><span className="channel-hash">#</span>{channel.name}</h2>
-        <span className="mono chat-space">space · {channel.space}</span>
+        <h2>{channel.space === "dm" ? channel.name : <><span className="channel-hash">#</span>{channel.name}</>}</h2>
+        <span className="mono chat-space">{channel.space === "dm" ? "direct message" : `space · ${channel.space}`}</span>
+        {onPromote && (
+          <button className="btn btn-ghost chat-promote" title="Turn this conversation into a background goal" onClick={onPromote}>
+            Promote to goal →
+          </button>
+        )}
       </header>
       <div className="chat-scroll" ref={scrollRef}>
         {feed.length === 0 && pending.length === 0 && (
@@ -1381,6 +1401,7 @@ function ChatView({ channel }: { channel: Channel }) {
 function Shell() {
   const { state, dispatch } = useStore();
   const [view, setView] = useState<View>("channels");
+  const [promoteChannelId, setPromoteChannelId] = useState<string | null>(null);
   const channel = state.channels.find((c) => c.id === state.currentChannelId) ?? null;
 
   return (
@@ -1394,9 +1415,9 @@ function Shell() {
           </div>
         )}
         <div className="shell-body">
-          {view === "inbox" && <InboxView />}
+          {view === "inbox" && <InboxView goTo={setView} />}
           {view === "board" && <BoardView goTo={setView} />}
-          {view === "goals" && <GoalsView />}
+          {view === "goals" && <GoalsView initialChannelId={promoteChannelId} />}
           {view === "pipelines" && <PipelinesView />}
           {view === "costs" && <CostsView />}
           {view === "memory" && <MemoryView />}
@@ -1405,7 +1426,13 @@ function Shell() {
           {view === "channels" &&
             (channel ? (
               <>
-                <ChatView channel={channel} />
+                <ChatView
+                  channel={channel}
+                  onPromote={() => {
+                    setPromoteChannelId(channel.id);
+                    setView("goals");
+                  }}
+                />
                 <Roster channel={channel} />
               </>
             ) : (
