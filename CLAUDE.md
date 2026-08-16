@@ -1,5 +1,10 @@
 # OpenMausBot fork — agent operating rules
 
+**Global doctrine:** `docs/GLOBAL-CLAUDE.md` is the repo copy of the owner's
+global CLAUDE.md (think-before-coding, simplicity, surgical changes,
+goal-driven execution, context mechanics, process routing, model matrix).
+Read it once per session; it governs everything below.
+
 This is Yosri's fork, being revamped into a next-generation hybrid platform
 (Grok Bot × Block Buzz × Type.com). Full-revamp authority: keep only what the
 platform needs from upstream OpenMausBot.
