@@ -44,9 +44,17 @@ spaces grouping, /api/audit + Admin Audit tab, and scripts/e2e-demo.mjs — a
 14-assert full-surface browser walkthrough (chat/DM/inbox-question/goal/
 board/pipeline-gate/connector-sync→memory/promote/costs/audit) — E2E OK.
 Ralph harness state in repo-root loop-state.json (git-excluded).
-NEXT (BACKLOG.md): E6 self-review + doc surface, chat status chips, PWA
-push, real connector OAuth (owner creds), foundry/openai_compat driver
-impls, live Managed-Agents validation (owner ANTHROPIC_API_KEY).
+WAVE 8 passes 4-8 (loop iters 9-13, all harness-verified): presence chips +
+reload-safe openTurns, self-review→memory loop, Files surface, server-side
+team walls (memory + connector visibility), connector re-partitioning,
+foundry + openai_compat driver IMPLEMENTATIONS (key-gated), `pnpm demo`
+idempotent seeder, claudeMd import onboarding, deployment README, PWA-lite
+manifest + hidden-tab desktop notifications, Space bundle page, chat polish
+(hover timestamps, scroll pinning), 12 w8 screenshots. 70 vitest + full e2e
+green (verify-all.sh). Unblocked backlog EXHAUSTED.
+BLOCKED ON OWNER: ANTHROPIC_API_KEY (live anthropic/managed validation +
+agent-sdk runner), Foundry keys, M365/Atlassian OAuth creds (real syncs).
+Loop parked on long heartbeat watching platform/.env for keys.
 
 ## Baselines
 
