@@ -39,8 +39,10 @@ Update it every iteration; mark DONE with commit hashes.
       what AGENTS claim to have learned).
 - [x] (044c8d9) Agent connectors: per-tool toggles; write_no_delete enforced
       server-side like files policy.
-- [ ] Admin UI: connect/disconnect, configure tools, assign visibility
-      (which teams/users see which connector).
+- [x] (95dc097) Admin UI: connect/disconnect, configure tools, assign visibility
+      (which teams/users see which connector) — visibility now ENFORCED
+      server-side: /api/state sends members only org- or own-team-scoped
+      connectors; admins receive all.
 - [ ] Real integrations behind a `ConnectorProvider` seam; mock provider
       first; M365 Graph + Atlassian next (need owner OAuth app creds — 
       collect via /wizard when reached).
@@ -49,8 +51,9 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (044c8d9) Roles: admin | member. First user = admin; admin can promote.
 - [x] (044c8d9) Teams: create teams, assign members; team-scoped visibility for
       connectors, memory (team scope), channels.
-- [ ] Org-memory partitioning: admin controls which teams see which memory
-      partitions (department walls).
+- [x] (d7ebafb) Org-memory partitioning: admin controls which teams see which memory
+      partitions (department walls) — connector re-scope (POST /api/connectors/:id
+      scope?/teamId?, future syncs) + server-side memory walls in /api/state.
 - [ ] Admin view: users, roles, teams, connector grants, memory partitions,
       audit log browser.
 
