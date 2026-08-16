@@ -207,6 +207,29 @@ describe("import (W8)", () => {
     expect(proposal!.status).toBe("active");
   });
 
+  it("files (E6): GET /api/files lists FileWritten events for admin and member alike", async () => {
+    const { dispatcher, base } = await bootWithEngines();
+    const admin = await login(base, "Yosri");
+    const { data: chData } = await post(base, admin.token, "/api/channels", { name: "docs", space: "general" });
+    const ch = (chData["channel"] as { id: string }).id;
+    const { data: agData } = await post(base, admin.token, "/api/agents", { name: "Scribe", channelId: ch });
+    const agent = agData["agent"] as AgentRecord;
+    await post(base, admin.token, `/api/channels/${ch}/messages`, { text: "@Scribe save file notes.md hello world" });
+    await dispatcher.idle(ch);
+    const res = await get(base, admin.token, "/api/files");
+    expect(res.status).toBe(200);
+    const { files } = JSON.parse(res.text) as { files: Array<{ agentId: string; name: string; bytes: number; ts: number }> };
+    expect(files.length).toBe(1);
+    expect(files[0]!.agentId).toBe(agent.id);
+    expect(files[0]!.name).toBe("notes.md");
+    expect(files[0]!.bytes).toBeGreaterThan(0);
+    // Single org: members see the same list.
+    const member = await login(base, "Sara");
+    const memberRes = await get(base, member.token, "/api/files");
+    expect(memberRes.status).toBe(200);
+    expect((JSON.parse(memberRes.text) as { files: unknown[] }).files.length).toBe(1);
+  });
+
   it("import is admin-only: non-admin gets 403", async () => {
     const { base } = await boot();
     await login(base, "Yosri"); // first human becomes admin

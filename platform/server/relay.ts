@@ -728,6 +728,17 @@ export function createRelay(store: EventStore = new EventStore()): Relay {
           return json(res, 200, { events });
         }
 
+        // GET /api/files — files agents have written (from FileWritten replay).
+        // Single org: every member sees all files.
+        if (method === "GET" && url.pathname === "/api/files") {
+          const files: Array<{ agentId: string; name: string; bytes: number; ts: number }> = [];
+          for (const e of store.replay(org)) {
+            if (e.body.kind !== EventKind.FileWritten) continue;
+            files.push({ agentId: e.body.agentId, name: e.body.name, bytes: e.body.bytes, ts: e.ts });
+          }
+          return json(res, 200, { files });
+        }
+
         // GET /api/export — YAML of the org's operating config (W6-E)
         if (method === "GET" && url.pathname === "/api/export") {
           res.writeHead(200, { "content-type": "text/yaml" });

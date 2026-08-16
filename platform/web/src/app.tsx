@@ -89,7 +89,7 @@ function Login() {
 
 // ---------- Sidebar ----------
 
-type View = "inbox" | "channels" | "board" | "goals" | "pipelines" | "costs" | "memory" | "computer" | "admin";
+type View = "inbox" | "channels" | "board" | "goals" | "pipelines" | "costs" | "memory" | "files" | "computer" | "admin";
 
 function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) {
   const { state, dispatch } = useStore();
@@ -143,6 +143,7 @@ function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) 
         <NavItem v="pipelines" label="Pipelines" badge={gatedRuns} />
         <NavItem v="costs" label="Costs" />
         <NavItem v="memory" label="Memory" badge={memQueue} />
+        <NavItem v="files" label="Files" />
         <NavItem v="computer" label="Computer" />
         {state.me?.role === "admin" && <NavItem v="admin" label="Admin" />}
       </div>
@@ -1094,6 +1095,47 @@ function AdminView() {
   );
 }
 
+// ---------- Files view (E6 doc surface) ----------
+
+type FileRow = { agentId: string; name: string; bytes: number; ts: number };
+
+function FilesView() {
+  const { state } = useStore();
+  const notice = useNotice();
+  const [files, setFiles] = useState<FileRow[]>([]);
+
+  useEffect(() => {
+    api<{ files: FileRow[] }>(state.token, "GET", "/api/files")
+      .then((r) => setFiles(r.files))
+      .catch(notice);
+  }, []);
+
+  const byAgent = new Map<string, FileRow[]>();
+  for (const f of files) byAgent.set(f.agentId, [...(byAgent.get(f.agentId) ?? []), f]);
+
+  return (
+    <Page title="Files" sub="Documents agents have produced, grouped by author.">
+      {files.length === 0 && (
+        <div className="panel-empty">
+          No files yet. Agents write files from their sandbox — ask one to “save file notes.md …” in a channel.
+        </div>
+      )}
+      {[...byAgent.entries()].map(([agentId, rows]) => (
+        <div key={agentId} className="card">
+          <div className="form-title mono">{state.roster[agentId]?.name ?? agentId} · {rows.length}</div>
+          {rows.map((f, i) => (
+            <div key={`${f.name}-${f.ts}-${i}`} className="admin-row" data-testid="file-row">
+              <span className="roster-name mono">{f.name}</span>
+              <span className="chip mono">{f.bytes} B</span>
+              <span className="card-ts mono">{new Date(f.ts).toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </Page>
+  );
+}
+
 function ComputerView() {
   const { state } = useStore();
   const byAgent = new Map<string, typeof state.sandboxEvents>();
@@ -1527,6 +1569,7 @@ function Shell() {
           {view === "pipelines" && <PipelinesView />}
           {view === "costs" && <CostsView />}
           {view === "memory" && <MemoryView />}
+          {view === "files" && <FilesView />}
           {view === "computer" && <ComputerView />}
           {view === "admin" && <AdminView />}
           {view === "channels" &&
