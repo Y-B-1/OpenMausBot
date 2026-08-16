@@ -64,6 +64,18 @@ suite (~30 files) green upstream; no auth/tenancy anywhere (see codebase map).
 - 2026-08-16 (owner): prototype is a WEB app.
 - 2026-08-16 (owner): autonomous ralph-loop mode while owner is offline;
   minimal interruptions; commit and push continuously.
+- 2026-08-17 (owner): model access via MICROSOFT FOUNDRY keys (enterprise
+  compliance). Consequence: Anthropic Managed Agents unavailable (Claude-API
+  only) — Atrium's own orchestration is the replacement; add `foundry`
+  driver via @anthropic-ai/foundry-sdk; verify region/model availability
+  before wiring (charge:research).
+- 2026-08-17: architecture Q&A → `docs/platform/ARCHITECTURE-QA.md` —
+  two agent classes (chat = thin harness on Foundry driver; work = Claude
+  Agent SDK sessions on runners), three sandbox tiers (Local / ephemeral
+  Azure Container Apps / persistent Azure VM runner pool with outbound-only
+  work queue + NSG egress from environment allowlist), concurrency only via
+  decomposition (parallel pipeline step + worktree isolation; channel stays
+  single-in-flight).
 
 ## Lessons (one line each)
 
