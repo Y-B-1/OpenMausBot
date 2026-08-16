@@ -9,7 +9,7 @@ import { onEvent, type Relay } from "../relay.ts";
 import type { AgentDriver, ToolDef, ToolResult } from "./driver.ts";
 import { MockDriver } from "./mock.ts";
 import { runDataQuery } from "./dataset.ts";
-import { buildProposal, injectableMemory, wrapDataBlock } from "./memory-gates.ts";
+import { buildProposal, injectableMemory, searchMemory, wrapDataBlock } from "./memory-gates.ts";
 import { LocalSandboxProvider, type SandboxProvider } from "./sandbox.ts";
 
 const MAX_BATCH = 10;
@@ -93,6 +93,15 @@ export const TOOL_DEFS: ToolDef[] = [
       type: "object",
       properties: { name: { type: "string" } },
       required: ["name"],
+    },
+  },
+  {
+    name: "memory_search",
+    description: "Search the org's accepted memory (connector-synced and human-approved). Team-walled entries are filtered by the channel's members.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
     },
   },
 ];
@@ -312,6 +321,11 @@ export function createDispatcher(relay: Relay, options: DispatcherOptions = {}):
               } catch (err) {
                 return { ok: false, output: String(err) };
               }
+            }
+            if (tool === "memory_search") {
+              const hits = searchMemory(projections, channel, lastAuthor, String(args["query"] ?? ""));
+              if (hits.length === 0) return { ok: true, output: "no memory matched" };
+              return { ok: true, output: wrapDataBlock(hits) };
             }
             if (tool === "files_read") {
               try {

@@ -80,6 +80,15 @@ export class MockDriver implements AgentDriver {
       return { text };
     }
 
+    // W7 (E4): recall from org memory.
+    const recallMatch = /recall (.+)/i.exec(lastText);
+    if (recallMatch) {
+      const result = await callbacks.onToolCall("memory_search", { query: recallMatch[1] });
+      const text = result.ok ? `From memory:\n${result.output}` : `Memory search failed: ${result.output}`;
+      callbacks.onDelta(text);
+      return { text };
+    }
+
     // W6-B: goal sessions — the orchestrator asks the agent to work one criterion.
     if (/work on criterion/i.test(lastText)) {
       const text = /impossible/i.test(lastText) ? "BLOCKED: cannot satisfy this criterion." : "DONE: criterion satisfied.";

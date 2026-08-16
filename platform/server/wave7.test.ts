@@ -143,6 +143,48 @@ describe("connectors (E2)", () => {
   });
 });
 
+describe("memory search with team walls (E4)", () => {
+  it("agent recalls org memory; team-walled entries only where a team member is present", async () => {
+    const { createDispatcher } = await import("./agents/dispatcher.ts");
+    const { relay, base } = await boot();
+    const dispatcher = createDispatcher(relay);
+    cleanups.push(() => dispatcher.dispose());
+    const admin = await login(base, "Yosri");
+    const outsider = await login(base, "Omar");
+    // Team with ONLY the admin in it.
+    const teamRes = await post(base, admin.token, "/api/teams", { name: "Engineering" });
+    const team = teamRes.data["team"] as TeamRecord;
+    await post(base, admin.token, `/api/teams/${team.id}/members`, { userId: admin.user.id });
+    // Org-wide + team-walled connector memory.
+    const sp = (await post(base, admin.token, "/api/connectors", { provider: "sharepoint", kind: "memory", scope: "org" })).data["connector"] as ConnectorRecord;
+    await post(base, admin.token, `/api/connectors/${sp.id}`, { status: "connected" });
+    await post(base, admin.token, `/api/connectors/${sp.id}/sync`);
+    const cf = (await post(base, admin.token, "/api/connectors", { provider: "confluence", kind: "memory", scope: "team", teamId: team.id })).data["connector"] as ConnectorRecord;
+    await post(base, admin.token, `/api/connectors/${cf.id}`, { status: "connected" });
+    await post(base, admin.token, `/api/connectors/${cf.id}/sync`);
+
+    // Channel A: admin (team member) + agent → sees the Confluence fact.
+    const chA = (await post(base, admin.token, "/api/channels", { name: "eng", space: "general" })).data["channel"] as Channel;
+    const agent = (await post(base, admin.token, "/api/agents", { name: "Dev", channelId: chA.id })).data["agent"] as { id: string; name: string };
+    await post(base, admin.token, `/api/channels/${chA.id}/messages`, { text: "@Dev recall incident severity levels" });
+    await dispatcher.idle(chA.id);
+    const replyA = (relay.projections.transcripts.get(chA.id) ?? []).filter((t) => t.authorId === agent.id && t.type === "message").at(-1)!.text;
+    expect(replyA).toContain("severity levels");
+
+    // Channel B: outsider (not on the team) + agent → team fact is walled off, org fact still visible.
+    const chB = (await post(base, outsider.token, "/api/channels", { name: "general", space: "general" })).data["channel"] as Channel;
+    await post(base, outsider.token, "/api/agents", { name: "Dev2", channelId: chB.id });
+    await post(base, outsider.token, `/api/channels/${chB.id}/messages`, { text: "@Dev2 recall incident severity levels" });
+    await dispatcher.idle(chB.id);
+    const replyB = (relay.projections.transcripts.get(chB.id) ?? []).filter((t) => t.type === "message").at(-1)!.text;
+    expect(replyB).not.toContain("severity levels");
+    await post(base, outsider.token, `/api/channels/${chB.id}/messages`, { text: "@Dev2 recall pricing sheet enterprise" });
+    await dispatcher.idle(chB.id);
+    const replyB2 = (relay.projections.transcripts.get(chB.id) ?? []).filter((t) => t.type === "message").at(-1)!.text;
+    expect(replyB2).toContain("Enterprise tier");
+  });
+});
+
 describe("DMs (E1)", () => {
   it("find-or-create returns the same 1:1 channel on repeat calls", async () => {
     const { base } = await boot();

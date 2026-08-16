@@ -60,7 +60,7 @@ Update it every iteration; mark DONE with commit hashes.
       shown (agent-proposed vs connector-synced vs human-written).
 - [x] (044c8d9) Review queue applies ONLY to agent proposals (make this visually
       obvious — this confused the owner).
-- [ ] Memory search endpoint for agents (retrieval respects team walls).
+- [x] (pending-hash) Memory search: `memory_search` agent tool + team walls (passesTeamWall/searchMemory in memory-gates).
 
 ### E5 — Engine room: Managed Agents + Agent SDK + Foundry option
 - [ ] `managed` driver: run a work agent as a CMA session (agents.create
