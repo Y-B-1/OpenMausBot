@@ -95,6 +95,15 @@ async function main() {
     const spaceTitle = await page.waitForSelector('.rail-space-title[data-space="general"]', { timeout: 10000 });
     assert(!!spaceTitle, "sidebar groups channels under a space heading");
 
+    // ---- Space page: heading opens the bundle view; channel row returns to chat ----
+    await page.click('.rail-space-title[data-space="general"]');
+    await page.waitForSelector('.page-head h2:has-text("Space · general")', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="space-channel-row"]:has-text("product")', { timeout: 10000 });
+    assert(true, "space page lists the #product channel");
+    await page.click('[data-testid="space-channel-row"]:has-text("product")');
+    await page.waitForSelector('.chat-head h2:has-text("product")', { timeout: 10000 });
+    assert(true, "space channel row opens the chat");
+
     if (only === "spaces") {
       console.log("E2E OK");
       return;

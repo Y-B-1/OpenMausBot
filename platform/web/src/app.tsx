@@ -89,9 +89,9 @@ function Login() {
 
 // ---------- Sidebar ----------
 
-type View = "inbox" | "channels" | "board" | "goals" | "pipelines" | "costs" | "memory" | "files" | "computer" | "admin";
+type View = "inbox" | "channels" | "board" | "goals" | "pipelines" | "costs" | "memory" | "files" | "computer" | "admin" | "space";
 
-function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) {
+function Sidebar({ view, setView, openSpace }: { view: View; setView: (v: View) => void; openSpace: (space: string) => void }) {
   const { state, dispatch } = useStore();
   const [draft, setDraft] = useState("");
   const notice = useNotice();
@@ -180,7 +180,9 @@ function Sidebar({ view, setView }: { view: View; setView: (v: View) => void }) 
           }
           return [...spaces.entries()].map(([space, chans]) => (
             <li key={space}>
-              <div className="rail-space-title mono" data-space={space}>{space}</div>
+              <button className="rail-space-title mono rail-space-btn" data-space={space} title={`Open the ${space} space`} onClick={() => openSpace(space)}>
+                {space}
+              </button>
               <ul className="channel-list">
                 {chans.map((c) => (
                   <li key={c.id}>
@@ -1103,6 +1105,56 @@ function AdminView() {
   );
 }
 
+// ---------- Space view (E6: spaces as bundles) ----------
+
+function SpaceView({ space, goTo }: { space: string; goTo: (v: View) => void }) {
+  const { state, dispatch } = useStore();
+  const channels = state.channels.filter((c) => c.space === space);
+  // Connectors and memory are already viewer-filtered server-side; a space
+  // bundles what its members can see: org + visible team connectors, and the
+  // team-walled shelf entries the viewer is allowed to read.
+  const connectors = Object.values(state.connectors);
+  const entries = Object.values(state.memory).filter((m) => m.status === "active" && m.scope === "space");
+  return (
+    <Page title={`Space · ${space}`} sub="Everything this space bundles: its rooms, the connectors feeding it, and its team memory.">
+      <div className="section-title mono">CHANNELS ({channels.length})</div>
+      {channels.length === 0 && <div className="panel-empty">No channels in this space yet.</div>}
+      {channels.map((c) => (
+        <button
+          key={c.id}
+          className="card space-channel-row"
+          data-testid="space-channel-row"
+          onClick={() => {
+            dispatch({ a: "select-channel", channelId: c.id });
+            goTo("channels");
+          }}
+        >
+          <span className="channel-hash">#</span>
+          <span className="goal-name">{c.name}</span>
+          <span className="card-foot mono">{c.memberIds.length} member{c.memberIds.length === 1 ? "" : "s"}</span>
+        </button>
+      ))}
+      <div className="section-title mono">CONNECTORS ({connectors.length})</div>
+      {connectors.length === 0 && <div className="panel-empty">No connectors visible to you.</div>}
+      {connectors.map((c) => (
+        <div key={c.id} className="card" data-testid="space-connector-card">
+          <div className="card-head">
+            <span className="goal-name">{c.name}</span>
+            <span className={`chip ${c.kind === "memory" ? "chip-question" : "chip-gate"}`}>{c.kind === "memory" ? "memory source" : "agent tool"}</span>
+            <span className="chip">{c.scope === "team" ? `team · ${state.teams[c.teamId ?? ""]?.name ?? "?"}` : c.scope}</span>
+            <span className={`chip ${c.status === "connected" ? "chip-done" : "chip-status-halted"}`}>{c.status}</span>
+          </div>
+        </div>
+      ))}
+      <div className="section-title mono">TEAM MEMORY ({entries.length})</div>
+      {entries.length === 0 && <div className="panel-empty">No team-shelf memory you can see yet.</div>}
+      {entries.map((m) => (
+        <MemoryCard key={m.id} entry={m} reviewable={false} />
+      ))}
+    </Page>
+  );
+}
+
 // ---------- Files view (E6 doc surface) ----------
 
 type FileRow = { agentId: string; name: string; bytes: number; ts: number };
@@ -1558,11 +1610,19 @@ function Shell() {
   const { state, dispatch } = useStore();
   const [view, setView] = useState<View>("channels");
   const [promoteChannelId, setPromoteChannelId] = useState<string | null>(null);
+  const [spaceName, setSpaceName] = useState<string | null>(null);
   const channel = state.channels.find((c) => c.id === state.currentChannelId) ?? null;
 
   return (
     <div className="shell">
-      <Sidebar view={view} setView={setView} />
+      <Sidebar
+        view={view}
+        setView={setView}
+        openSpace={(space) => {
+          setSpaceName(space);
+          setView("space");
+        }}
+      />
       <div className="shell-main">
         {state.notice && (
           <div className="notice" role="alert">
@@ -1580,6 +1640,7 @@ function Shell() {
           {view === "files" && <FilesView />}
           {view === "computer" && <ComputerView />}
           {view === "admin" && <AdminView />}
+          {view === "space" && spaceName && <SpaceView space={spaceName} goTo={setView} />}
           {view === "channels" &&
             (channel ? (
               <>
