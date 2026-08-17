@@ -174,7 +174,7 @@ needed); **exit criterion: `pnpm test` green, including the pass's new
 tests**; commit per pass. The running dev stack (server 8799 / vite 5199 /
 electron) must never be killed — vitest and `tsc` don't touch it.
 
-### P0 — Baseline
+### P0 — Baseline ✅ DONE (commit fd344b2)
 Run `pnpm test` and `pnpm typecheck`; record counts + any pre-existing
 failures at the top of this file. No code. Verify: exit 0 (or documented
 pre-existing failures).
@@ -186,8 +186,25 @@ pre-existing failures).
   `OMB_DATA_DIR` with the stack idle, characterize each failing file,
   and pin the authoritative green/red list here). "Suite green" in later
   passes means: no NEW failures beyond the P0-pinned list.
+- **Pinned 2026-08-17 (docs/platform/UPSTREAM-TEST-BASELINE.md):** under an
+  isolated SHORT `OMB_DATA_DIR` the suite is FULLY GREEN — 35 files,
+  287 passed / 8 skipped. All 35 planning-time failures were shared
+  `~/.openmausbot` interference. Gotcha: the data dir path must be short
+  (claude driver test binds a unix socket inside it; macOS sun_path ≈104B).
 
-### P1 — Inbox + blocking questions (highest visibility)
+### P1 — Inbox + blocking questions (highest visibility) ✅ DONE
+(commits 17f676d server, a9ea559 UI, screenshot+tick commit follows)
+Shipped: `server/inbox.ts` + `inbox.test.ts` (7 tests); routes GET/POST
+`/api/inbox`, POST `/api/inbox/:id/reply`, POST `/api/inbox/questions`,
+POST `/api/inbox/questions/:id/answer`; live QUESTION asks mirrored into
+the inbox on `request.opened` and settled on `request.resolved`; answering
+a mirrored question from the Inbox calls `respondToRequest` and unblocks
+the turn. UI: `InboxPage.tsx` two-pane (buzz home layout, upstream tokens),
+store slice + SSE folds, Sidebar Inbox button with pending-count badge.
+Suite 36 files green (baseline 35 + inbox), typecheck green. Evidence:
+`platform/web/screenshot-p1-inbox.png` (isolated server on 8899 — the live
+8799 process predates the routes and must not be restarted; same code,
+seeded via curl).
 - New `server/inbox.ts` + `inbox.test.ts` (port logic from
   `platform/server/relay.ts` inbox handlers + `InboxItem`/`QuestionRecord`
   from `platform/shared/contracts.ts`; storage: `inbox.json` via
