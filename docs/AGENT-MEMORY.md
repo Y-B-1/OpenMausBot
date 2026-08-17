@@ -73,6 +73,13 @@ suite (~30 files) green upstream; no auth/tenancy anywhere (see codebase map).
 
 ## Binding decisions
 
+- 2026-08-18 (owner, PIVOT — supersedes "base stays ours"): the UPSTREAM
+  OpenMausBot app (src/, electron/, server/, its agent format and assets) is
+  the product base, kept exactly as-is. Everything in platform/ becomes
+  features to port INTO that shell, following upstream patterns. Mine Buzz
+  code for useful pieces. platform/ remains the reference implementation +
+  test bed during the port.
+
 - 2026-08-16 (owner): full-revamp authority on this fork; take from upstream
   only what the platform needs.
 - 2026-08-16 (owner): personal project first (possible enterprise sale, e.g.
