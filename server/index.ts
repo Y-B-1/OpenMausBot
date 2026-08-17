@@ -31,6 +31,7 @@ import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { RoutineManager, type RoutineRunOn } from "./routines.ts";
+import { InboxManager } from "./inbox.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -165,6 +166,9 @@ const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> 
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
 let routines: RoutineManager | null = null;
+// Cross-bot inbox: agent-posted items + blocking questions, mirrored from
+// live provider asks so nothing waits unseen behind an unselected bot.
+const inbox = new InboxManager({ emit: broadcast });
 // The Local VM is intentionally one shared, visible desktop. Two agents
 // driving it simultaneously would mix clicks, keystrokes and screenshots,
 // so only one thread may lease it at a time.
@@ -302,6 +306,17 @@ bus.subscribe((event: RuntimeEvent) => {
         },
       });
       if (event.requestId) askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id);
+      // A QUESTION is blocking work somewhere — mirror it into the inbox so
+      // it is visible even when this bot's chat is not the selected view.
+      if (!permission && event.requestId && asker) {
+        inbox.askQuestion({
+          botId: asker.id,
+          prompt: event.summary,
+          options: event.choices ?? [],
+          threadId: event.threadId,
+          requestId: event.requestId,
+        });
+      }
       break;
     }
     case "request.resolved": {
@@ -316,6 +331,9 @@ bus.subscribe((event: RuntimeEvent) => {
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
       }
+      // however the ask was settled (chat card, auto mode, inbox), the
+      // mirrored inbox question must never stay pending
+      if (event.requestId) inbox.resolveAsk(event.threadId, event.requestId, event.behavior);
       break;
     }
     case "runtime.error":
@@ -1069,6 +1087,49 @@ const server = createServer(async (req, res) => {
         ? await routines!.cancelRun(runMatch[1])
         : routines!.markSeen(runMatch[1]);
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such active run" });
+    }
+
+    // ── inbox: cross-bot items + blocking questions ──────────────────────
+    if (path === "/api/inbox" && method === "GET") {
+      return json(res, 200, { items: inbox.listItems(), questions: inbox.listQuestions() });
+    }
+    if (path === "/api/inbox" && method === "POST") {
+      return json(res, 201, { item: inbox.postItem(await readBody(req)) });
+    }
+    if (path === "/api/inbox/questions" && method === "POST") {
+      return json(res, 201, { question: inbox.askQuestion(await readBody(req)) });
+    }
+    let inboxMatch = path.match(/^\/api\/inbox\/([\w-]+)\/reply$/);
+    if (inboxMatch && method === "POST") {
+      const body = await readBody(req);
+      const item = inbox.replyItem(inboxMatch[1], String(body.reply ?? ""));
+      return item ? json(res, 200, { item }) : json(res, 404, { error: "no such inbox item" });
+    }
+    inboxMatch = path.match(/^\/api\/inbox\/questions\/([\w-]+)\/answer$/);
+    if (inboxMatch && method === "POST") {
+      const body = await readBody(req);
+      const answer = String(body.answer ?? "");
+      const pending = inbox.question(inboxMatch[1]);
+      if (!pending) return json(res, 404, { error: "no such question" });
+      if (pending.status === "answered") return json(res, 409, { error: "already answered" });
+      if (pending.threadId && pending.requestId) {
+        // Mirrored live ask: unblock the waiting provider first; its
+        // request.resolved event settles the mirrored row for every client.
+        const group = store.groupByThread(pending.threadId);
+        const owner = group
+          ? (group.busyBotId ? store.bot(group.busyBotId) : undefined)
+          : store.botByThread(pending.threadId);
+        const instance = owner ? registry.get(owner.modelSelection.instanceId) : undefined;
+        if (!instance) return json(res, 409, { error: "provider unavailable" });
+        await instance.adapter.respondToRequest(pending.threadId, pending.requestId, {
+          behavior: "answer",
+          message: answer,
+        });
+        const settled = inbox.resolveAsk(pending.threadId, pending.requestId, answer);
+        return json(res, 200, { question: settled ?? inbox.question(pending.id) });
+      }
+      const question = inbox.answerQuestion(pending.id, answer);
+      return question ? json(res, 200, { question }) : json(res, 404, { error: "no such question" });
     }
 
     // ── events stream ──
