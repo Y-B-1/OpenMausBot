@@ -3,6 +3,7 @@
 
 import type { Goal } from "@/lib/goals";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
+import type { PipelineRun } from "@/lib/pipelines";
 import type { RoutineRun } from "@/lib/routines";
 
 /** The slice of a Bot the board needs (structural, so tests stay plain). */
@@ -29,12 +30,13 @@ export type BoardNav =
   | { view: "chat"; botId: string; threadId: string }
   | { view: "goals" }
   | { view: "inbox" }
-  | { view: "routines" };
+  | { view: "routines" }
+  | { view: "pipelines" };
 
 export interface BoardCard {
   /** unique across the whole board (kind-prefixed) */
   id: string;
-  kind: "task" | "goal" | "question" | "note" | "routine";
+  kind: "task" | "goal" | "question" | "note" | "routine" | "pipeline";
   title: string;
   subtitle: string;
   botId?: string;
@@ -49,6 +51,7 @@ export interface BoardInput {
   inboxItems: InboxItem[];
   inboxQuestions: InboxQuestion[];
   routineRuns: RoutineRun[];
+  pipelineRuns: PipelineRun[];
 }
 
 const GOAL_COLUMN: Record<Goal["status"], BoardColumnKey> = {
@@ -56,6 +59,15 @@ const GOAL_COLUMN: Record<Goal["status"], BoardColumnKey> = {
   paused: "queued",
   done: "done",
   halted: "waiting", // a guardrail stop needs a human decision
+  cancelled: "halted",
+};
+
+const PIPELINE_COLUMN: Record<PipelineRun["status"], BoardColumnKey> = {
+  running: "inProgress",
+  waiting_approval: "waiting", // suspended on a human approval gate
+  done: "done",
+  rejected: "halted",
+  failed: "halted",
   cancelled: "halted",
 };
 
@@ -135,6 +147,23 @@ export function computeBoard(input: BoardInput): Record<BoardColumnKey, BoardCar
       botId: item.botId,
       nav: { view: "inbox" },
       ts: item.ts,
+    });
+  }
+
+  for (const run of input.pipelineRuns) {
+    const doneSteps = run.stepStates.filter((s) => s === "done").length;
+    add(PIPELINE_COLUMN[run.status], {
+      id: `pipeline:${run.id}`,
+      kind: "pipeline",
+      title: run.name,
+      subtitle:
+        run.status === "waiting_approval"
+          ? `awaiting approval · step ${run.stepIndex + 1}/${run.steps.length}`
+          : run.haltReason
+            ? run.haltReason
+            : `${doneSteps}/${run.steps.length} steps`,
+      nav: { view: "pipelines" },
+      ts: run.updatedAt,
     });
   }
 

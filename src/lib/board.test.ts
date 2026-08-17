@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { computeBoard, type BoardInput } from "./board";
 import type { Goal } from "./goals";
+import type { PipelineRun } from "./pipelines";
 import type { RoutineRun } from "./routines";
 
 const guardrails = { maxSessions: 10, spendCapUsd: 5, wallClockMinutes: 120, stuckThreshold: 3 };
@@ -46,6 +47,29 @@ function input(over: Partial<BoardInput>): BoardInput {
     inboxItems: [],
     inboxQuestions: [],
     routineRuns: [],
+    pipelineRuns: [],
+    ...over,
+  };
+}
+
+function pipelineRun(over: Partial<PipelineRun>): PipelineRun {
+  return {
+    id: "p1",
+    templateId: "tpl1",
+    name: "Ship pipeline",
+    input: "",
+    steps: [
+      { id: "s1", title: "Draft", prompt: "draft", botId: "b1" },
+      { id: "s2", title: "Publish", prompt: "publish", botId: "b1", gate: "approval" },
+    ],
+    status: "running",
+    stepIndex: 0,
+    stepStates: ["pending", "pending"],
+    stepOutputs: [null, null],
+    approvedSteps: [],
+    startedAt: 1,
+    createdAt: 1,
+    updatedAt: 2,
     ...over,
   };
 }
@@ -126,6 +150,36 @@ describe("computeBoard", () => {
     expect(board.halted.map((c) => c.id).sort()).toEqual(["routine:r5", "routine:r6"]);
     expect(board.halted.find((c) => c.id === "routine:r5")!.subtitle).toContain("boom");
     expect(board.halted.find((c) => c.id === "routine:r6")!.subtitle).toContain("missed");
+  });
+
+  it("maps pipeline runs; a suspended gate waits on a human", () => {
+    const board = computeBoard(
+      input({
+        bots: [],
+        pipelineRuns: [
+          pipelineRun({ id: "p1", status: "running", stepStates: ["done", "pending"] }),
+          pipelineRun({
+            id: "p2",
+            status: "waiting_approval",
+            stepIndex: 1,
+            stepStates: ["done", "pending"],
+            approval: { token: "tok", stepIndex: 1, expiresAt: 99 },
+          }),
+          pipelineRun({ id: "p3", status: "done", stepStates: ["done", "done"] }),
+          pipelineRun({ id: "p4", status: "rejected", haltReason: "gate rejected at step 2" }),
+          pipelineRun({ id: "p5", status: "failed" }),
+          pipelineRun({ id: "p6", status: "cancelled" }),
+        ],
+      }),
+    );
+    expect(board.inProgress.map((c) => c.id)).toEqual(["pipeline:p1"]);
+    expect(board.inProgress[0]!.subtitle).toBe("1/2 steps");
+    expect(board.waiting.map((c) => c.id)).toEqual(["pipeline:p2"]);
+    expect(board.waiting[0]!.subtitle).toContain("awaiting approval");
+    expect(board.done.map((c) => c.id)).toEqual(["pipeline:p3"]);
+    expect(board.halted.map((c) => c.id).sort()).toEqual(["pipeline:p4", "pipeline:p5", "pipeline:p6"]);
+    expect(board.halted.find((c) => c.id === "pipeline:p4")!.subtitle).toContain("gate rejected");
+    expect(board.waiting[0]!.nav).toEqual({ view: "pipelines" });
   });
 
   it("orders each column newest first", () => {

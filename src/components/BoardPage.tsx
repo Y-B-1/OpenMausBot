@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { CalendarDays, HelpCircle, Kanban, Mail, MessageSquare, Target } from "lucide-react";
+import { CalendarDays, HelpCircle, Kanban, Mail, MessageSquare, Target, Workflow } from "lucide-react";
 
 import { MausAvatar } from "@/components/Avatar";
 import { BOARD_COLUMNS, computeBoard, type BoardCard } from "@/lib/board";
@@ -12,6 +12,7 @@ const KIND_ICON: Record<BoardCard["kind"], typeof Target> = {
   question: HelpCircle,
   note: Mail,
   routine: CalendarDays,
+  pipeline: Workflow,
 };
 
 function Card({ card }: { card: BoardCard }) {
@@ -24,6 +25,7 @@ function Card({ card }: { card: BoardCard }) {
         if (card.nav.view === "chat") dispatch({ type: "select", id: card.nav.botId });
         else if (card.nav.view === "goals") dispatch({ type: "showGoals" });
         else if (card.nav.view === "inbox") dispatch({ type: "showInbox" });
+        else if (card.nav.view === "pipelines") dispatch({ type: "showPipelines" });
         else dispatch({ type: "showRoutines" });
       }}
       className="flex w-full flex-col gap-1.5 rounded-xl border border-hairline/50 bg-panel px-3 py-2.5 text-left transition-colors hover:bg-raised/50"
@@ -51,8 +53,9 @@ export function BoardPage() {
         inboxItems: state.inboxItems,
         inboxQuestions: state.inboxQuestions,
         routineRuns: state.routineRuns,
+        pipelineRuns: state.pipelineRuns,
       }),
-    [state.bots, state.goals, state.inboxItems, state.inboxQuestions, state.routineRuns],
+    [state.bots, state.goals, state.inboxItems, state.inboxQuestions, state.routineRuns, state.pipelineRuns],
   );
   const empty = BOARD_COLUMNS.every((column) => board[column.key].length === 0);
 

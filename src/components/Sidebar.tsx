@@ -14,6 +14,7 @@ import {
   Inbox,
   Kanban,
   Target,
+  Workflow,
   Loader2,
   Pencil,
   Pin,
@@ -665,6 +666,24 @@ export function Sidebar() {
         >
           <Kanban size={20} className={state.activeView === "board" ? "text-accent" : "text-ink-secondary"} />
           <span className="flex-1 text-[14px]">Board</span>
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showPipelines" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "pipelines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Workflow size={20} className={state.activeView === "pipelines" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Pipelines</span>
+          {(() => {
+            const waiting = state.pipelineRuns.filter((run) => run.status === "waiting_approval").length;
+            return waiting > 0 ? (
+              <span className="rounded-full bg-warning px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">
+                {waiting}
+              </span>
+            ) : null;
+          })()}
         </button>
         <button
           onClick={() => dispatch({ type: "showRoutines" })}

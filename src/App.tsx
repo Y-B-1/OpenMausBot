@@ -16,6 +16,7 @@ import { RoutinesPage } from "@/components/RoutinesPage";
 import { InboxPage } from "@/components/InboxPage";
 import { GoalsPage } from "@/components/GoalsPage";
 import { BoardPage } from "@/components/BoardPage";
+import { PipelinesPage } from "@/components/PipelinesPage";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
@@ -76,6 +77,8 @@ function Shell() {
         <GoalsPage />
       ) : state.activeView === "board" ? (
         <BoardPage />
+      ) : state.activeView === "pipelines" ? (
+        <PipelinesPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (

@@ -17,6 +17,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import type { Goal, GoalInput } from "@/lib/goals";
+import type { PipelineRun, PipelineTemplate, TemplateInput } from "@/lib/pipelines";
 import { currentCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
 
@@ -205,12 +206,14 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals" | "board";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
   inboxQuestions: InboxQuestion[];
   goals: Goal[];
+  pipelineTemplates: PipelineTemplate[];
+  pipelineRuns: PipelineRun[];
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
@@ -246,6 +249,15 @@ type Action =
   | { type: "pauseGoal"; goalId: string }
   | { type: "resumeGoal"; goalId: string }
   | { type: "cancelGoal"; goalId: string }
+  | { type: "showPipelines" }
+  | { type: "pipelinesHydrated"; templates: PipelineTemplate[]; runs: PipelineRun[] }
+  | { type: "pipelineTemplatePatched"; template: PipelineTemplate }
+  | { type: "pipelineRunPatched"; run: PipelineRun }
+  | { type: "createPipelineTemplate"; input: TemplateInput }
+  | { type: "startPipeline"; templateId: string; input: string }
+  | { type: "approvePipeline"; runId: string; token: string }
+  | { type: "rejectPipeline"; runId: string; token: string }
+  | { type: "cancelPipeline"; runId: string }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -441,6 +453,47 @@ function reducer(state: AppState, action: Action): AppState {
         computerOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
+      };
+    case "showPipelines":
+      return {
+        ...state,
+        activeView: "pipelines",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "pipelinesHydrated":
+      return { ...state, pipelineTemplates: action.templates, pipelineRuns: action.runs };
+    case "pipelineTemplatePatched": {
+      const exists = state.pipelineTemplates.some((t) => t.id === action.template.id);
+      return {
+        ...state,
+        pipelineTemplates: exists
+          ? state.pipelineTemplates.map((t) => (t.id === action.template.id ? action.template : t))
+          : [action.template, ...state.pipelineTemplates],
+      };
+    }
+    case "pipelineRunPatched": {
+      const exists = state.pipelineRuns.some((run) => run.id === action.run.id);
+      return {
+        ...state,
+        pipelineRuns: exists
+          ? state.pipelineRuns.map((run) => (run.id === action.run.id ? action.run : run))
+          : [action.run, ...state.pipelineRuns],
+      };
+    }
+    case "createPipelineTemplate":
+    case "startPipeline":
+    case "approvePipeline":
+    case "rejectPipeline":
+      return state; // the server's patches confirm these
+    case "cancelPipeline":
+      return {
+        ...state,
+        pipelineRuns: state.pipelineRuns.map((run) =>
+          run.id === action.runId ? { ...run, status: "cancelled" } : run,
+        ),
       };
     case "goalsHydrated":
       return { ...state, goals: action.goals };
@@ -799,6 +852,8 @@ const initialState: AppState = {
   inboxItems: [],
   inboxQuestions: [],
   goals: [],
+  pipelineTemplates: [],
+  pipelineRuns: [],
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
@@ -956,6 +1011,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelGoal":
           api(`/api/goals/${action.goalId}/cancel`, { method: "POST" }).catch(showError);
+          break;
+        case "createPipelineTemplate":
+          api("/api/templates", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
+          break;
+        case "startPipeline":
+          api("/api/pipelines", {
+            method: "POST",
+            body: JSON.stringify({ templateId: action.templateId, input: action.input }),
+          }).catch(showError);
+          break;
+        case "approvePipeline":
+          api(`/api/pipelines/${action.runId}/approve`, {
+            method: "POST",
+            body: JSON.stringify({ token: action.token }),
+          }).catch(showError);
+          break;
+        case "rejectPipeline":
+          api(`/api/pipelines/${action.runId}/reject`, {
+            method: "POST",
+            body: JSON.stringify({ token: action.token }),
+          }).catch(showError);
+          break;
+        case "cancelPipeline":
+          api(`/api/pipelines/${action.runId}/cancel`, { method: "POST" }).catch(showError);
           break;
         case "send":
           api(`/api/bots/${action.botId}/messages`, {
@@ -1195,6 +1274,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/goals")
         .then(({ goals }) => alive && rawDispatch({ type: "goalsHydrated", goals }))
         .catch(() => {});
+      api("/api/pipelines")
+        .then(({ templates, runs }) => alive && rawDispatch({ type: "pipelinesHydrated", templates, runs }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -1289,6 +1371,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "goal":
           rawDispatch({ type: "goalPatched", goal: frame.goal });
+          break;
+        case "pipeline.template":
+          rawDispatch({ type: "pipelineTemplatePatched", template: frame.template });
+          break;
+        case "pipeline.run":
+          rawDispatch({ type: "pipelineRunPatched", run: frame.run });
           break;
         case "runtime": {
           const event = frame.event;
