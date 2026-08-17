@@ -8,6 +8,7 @@ import {
   Cable,
   CalendarDays,
   Check,
+  CircleDollarSign,
   ClipboardCopy,
   Copy,
   Crown,
@@ -687,6 +688,21 @@ export function Sidebar() {
               </span>
             ) : null;
           })()}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showCosts" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "costs" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <CircleDollarSign size={20} className={state.activeView === "costs" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Costs</span>
+          {state.costs && state.costs.totals.todayUsd > 0 && (
+            <span className="rounded-full bg-raised px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-ink-secondary">
+              ${state.costs.totals.todayUsd.toFixed(2)}
+            </span>
+          )}
         </button>
         <button
           onClick={() => dispatch({ type: "showMemory" })}

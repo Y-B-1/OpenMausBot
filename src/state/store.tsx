@@ -17,6 +17,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import type { Goal, GoalInput } from "@/lib/goals";
+import type { CostSummary } from "@/lib/costs";
 import type { MemoryAddInput, MemoryEntry } from "@/lib/memory";
 import type { OrgConnector, OrgConnectorInput, OrgProviderInfo } from "@/lib/org-connectors";
 import { orgToken, setOrgToken, type OrgRole, type OrgState, type OrgUser } from "@/lib/org";
@@ -209,12 +210,14 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors" | "admin";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors" | "admin" | "costs";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
   inboxQuestions: InboxQuestion[];
   goals: Goal[];
+  /** P8 cost ledger summary; null until /api/costs answers (or 403 for members) */
+  costs: CostSummary | null;
   pipelineTemplates: PipelineTemplate[];
   pipelineRuns: PipelineRun[];
   memoryEntries: MemoryEntry[];
@@ -259,6 +262,8 @@ type Action =
   | { type: "pauseGoal"; goalId: string }
   | { type: "resumeGoal"; goalId: string }
   | { type: "cancelGoal"; goalId: string }
+  | { type: "showCosts" }
+  | { type: "costsHydrated"; summary: CostSummary }
   | { type: "showPipelines" }
   | { type: "pipelinesHydrated"; templates: PipelineTemplate[]; runs: PipelineRun[] }
   | { type: "pipelineTemplatePatched"; template: PipelineTemplate }
@@ -494,6 +499,17 @@ function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
+    case "showCosts":
+      return {
+        ...state,
+        activeView: "costs",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "costsHydrated":
+      return { ...state, costs: action.summary };
     case "showPipelines":
       return {
         ...state,
@@ -1009,6 +1025,7 @@ const initialState: AppState = {
   inboxItems: [],
   inboxQuestions: [],
   goals: [],
+  costs: null,
   pipelineTemplates: [],
   pipelineRuns: [],
   memoryEntries: [],
@@ -1542,6 +1559,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/goals")
         .then(({ goals }) => alive && rawDispatch({ type: "goalsHydrated", goals }))
         .catch(() => {});
+      api("/api/costs")
+        .then(({ summary }) => alive && rawDispatch({ type: "costsHydrated", summary }))
+        .catch(() => {}); // members get a 403 in org mode — the page explains
+
       api("/api/pipelines")
         .then(({ templates, runs }) => alive && rawDispatch({ type: "pipelinesHydrated", templates, runs }))
         .catch(() => {});
@@ -1659,6 +1680,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "goal":
           rawDispatch({ type: "goalPatched", goal: frame.goal });
+          break;
+        case "cost":
+          rawDispatch({ type: "costsHydrated", summary: frame.summary });
           break;
         case "pipeline.template":
           rawDispatch({ type: "pipelineTemplatePatched", template: frame.template });
