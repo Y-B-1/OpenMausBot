@@ -18,6 +18,7 @@ import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import type { Goal, GoalInput } from "@/lib/goals";
 import type { MemoryAddInput, MemoryEntry } from "@/lib/memory";
+import type { OrgConnector, OrgConnectorInput, OrgProviderInfo } from "@/lib/org-connectors";
 import type { PipelineRun, PipelineTemplate, TemplateInput } from "@/lib/pipelines";
 import { currentCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
@@ -207,7 +208,7 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
@@ -216,6 +217,8 @@ interface AppState {
   pipelineTemplates: PipelineTemplate[];
   pipelineRuns: PipelineRun[];
   memoryEntries: MemoryEntry[];
+  orgConnectors: OrgConnector[];
+  orgConnectorCatalog: OrgProviderInfo[];
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
@@ -267,6 +270,17 @@ type Action =
   | { type: "reviewMemory"; entryId: string; verdict: "accept" | "reject" }
   | { type: "promoteMemory"; entryId: string }
   | { type: "retireMemory"; entryId: string }
+  | { type: "showConnectors" }
+  | { type: "orgConnectorsHydrated"; connectors: OrgConnector[] }
+  | { type: "orgConnectorCatalogHydrated"; catalog: OrgProviderInfo[] }
+  | { type: "orgConnectorPatched"; connector: OrgConnector }
+  | { type: "orgConnectorRemoved"; connectorId: string }
+  | { type: "addOrgConnector"; input: OrgConnectorInput }
+  | { type: "connectOrgConnector"; connectorId: string }
+  | { type: "disconnectOrgConnector"; connectorId: string }
+  | { type: "syncOrgConnector"; connectorId: string }
+  | { type: "removeOrgConnector"; connectorId: string }
+  | { type: "toggleOrgConnectorTool"; connectorId: string; name: string; enabled: boolean }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -520,6 +534,43 @@ function reducer(state: AppState, action: Action): AppState {
           entry.id === action.entryId ? { ...entry, status: "retired" } : entry,
         ),
       };
+    case "showConnectors":
+      return {
+        ...state,
+        activeView: "connectors",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "orgConnectorsHydrated":
+      return { ...state, orgConnectors: action.connectors };
+    case "orgConnectorCatalogHydrated":
+      return { ...state, orgConnectorCatalog: action.catalog };
+    case "orgConnectorPatched": {
+      const exists = state.orgConnectors.some((connector) => connector.id === action.connector.id);
+      return {
+        ...state,
+        orgConnectors: exists
+          ? state.orgConnectors.map((connector) =>
+              connector.id === action.connector.id ? action.connector : connector,
+            )
+          : [action.connector, ...state.orgConnectors],
+      };
+    }
+    case "orgConnectorRemoved":
+      return {
+        ...state,
+        orgConnectors: state.orgConnectors.filter((connector) => connector.id !== action.connectorId),
+      };
+    // HTTP side-effects; the server's org_connector patches update state
+    case "addOrgConnector":
+    case "connectOrgConnector":
+    case "disconnectOrgConnector":
+    case "syncOrgConnector":
+    case "removeOrgConnector":
+    case "toggleOrgConnectorTool":
+      return state;
     case "pipelinesHydrated":
       return { ...state, pipelineTemplates: action.templates, pipelineRuns: action.runs };
     case "pipelineTemplatePatched": {
@@ -912,6 +963,8 @@ const initialState: AppState = {
   pipelineTemplates: [],
   pipelineRuns: [],
   memoryEntries: [],
+  orgConnectors: [],
+  orgConnectorCatalog: [],
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
@@ -1081,6 +1134,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "retireMemory":
           api(`/api/memory/${action.entryId}`, { method: "DELETE" }).catch(showError);
+          break;
+        case "addOrgConnector":
+          api("/api/org-connectors", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
+          break;
+        case "connectOrgConnector":
+          api(`/api/org-connectors/${action.connectorId}/connect`, { method: "POST" }).catch(showError);
+          break;
+        case "disconnectOrgConnector":
+          api(`/api/org-connectors/${action.connectorId}/disconnect`, { method: "POST" }).catch(showError);
+          break;
+        case "syncOrgConnector":
+          api(`/api/org-connectors/${action.connectorId}/sync`, { method: "POST" }).catch(showError);
+          break;
+        case "removeOrgConnector":
+          api(`/api/org-connectors/${action.connectorId}`, { method: "DELETE" }).catch(showError);
+          break;
+        case "toggleOrgConnectorTool":
+          api(`/api/org-connectors/${action.connectorId}/tools`, {
+            method: "POST",
+            body: JSON.stringify({ name: action.name, enabled: action.enabled }),
+          }).catch(showError);
           break;
         case "createPipelineTemplate":
           api("/api/templates", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
@@ -1350,6 +1424,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/memory")
         .then(({ entries }) => alive && rawDispatch({ type: "memoryHydrated", entries }))
         .catch(() => {});
+      api("/api/org-connectors")
+        .then(({ connectors }) => alive && rawDispatch({ type: "orgConnectorsHydrated", connectors }))
+        .catch(() => {});
+      api("/api/org-connectors/catalog")
+        .then(({ catalog }) => alive && rawDispatch({ type: "orgConnectorCatalogHydrated", catalog }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -1453,6 +1533,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "memory":
           rawDispatch({ type: "memoryPatched", entry: frame.entry });
+          break;
+        case "org_connector":
+          rawDispatch({ type: "orgConnectorPatched", connector: frame.connector });
+          break;
+        case "org_connector_removed":
+          rawDispatch({ type: "orgConnectorRemoved", connectorId: frame.id });
           break;
         case "runtime": {
           const event = frame.event;

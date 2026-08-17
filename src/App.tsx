@@ -18,6 +18,7 @@ import { GoalsPage } from "@/components/GoalsPage";
 import { BoardPage } from "@/components/BoardPage";
 import { PipelinesPage } from "@/components/PipelinesPage";
 import { MemoryPage } from "@/components/MemoryPage";
+import { OrgConnectorsPage } from "@/components/OrgConnectorsPage";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
@@ -82,6 +83,8 @@ function Shell() {
         <PipelinesPage />
       ) : state.activeView === "memory" ? (
         <MemoryPage />
+      ) : state.activeView === "connectors" ? (
+        <OrgConnectorsPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (

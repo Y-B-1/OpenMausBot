@@ -5,6 +5,7 @@ import {
   BellDot,
   Bot as BotIcon,
   Brain,
+  Cable,
   CalendarDays,
   Check,
   ClipboardCopy,
@@ -702,6 +703,24 @@ export function Sidebar() {
             return pending > 0 ? (
               <span className="rounded-full bg-warning px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">
                 {pending}
+              </span>
+            ) : null;
+          })()}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showConnectors" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "connectors" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Cable size={20} className={state.activeView === "connectors" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Connectors</span>
+          {(() => {
+            const connected = state.orgConnectors.filter((connector) => connector.status === "connected").length;
+            return connected > 0 ? (
+              <span className="rounded-full bg-raised px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-ink-secondary">
+                {connected}
               </span>
             ) : null;
           })()}
