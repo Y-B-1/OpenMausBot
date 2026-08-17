@@ -410,14 +410,30 @@ threading through those engines is a later pass.
 - Verify: vitest — auth disabled: everything as before; enabled: 401 gate,
   role checks; team walls now enforced in P5's memory filters.
 
-### P8 — Costs
-- New `server/costs.ts` + tests: per-turn cost records appended
-  `costs.ndjson`; hook the existing `EventBus.subscribe` to record on
-  turn-completed events (adapter pattern — no driver changes). Port
-  estimation from dispatcher.ts `TurnCost`.
-- Routes: `/api/costs` (+ per-bot rollup). UI: `CostsPage.tsx` or a
-  Costs tab in AdminPage.
-- Verify: vitest — fake-driver turn → one cost row; rollup sums.
+### P8 — Costs ✅ DONE
+(commits: server + UI + this evidence commit)
+Shipped: `server/costs.ts` + `costs.test.ts` (6 tests) — `CostManager`
+(manager pattern, `costs.json`, atomic writes): a bus tee recording every
+`turn.completed` that carries a provider-reported cost as a ledger entry
+{ts, botId, threadId, costUsd, model (remembered per thread from
+`session.started`), source}. Attribution runs FIRST in the shared
+`bus.subscribe` — it asks the engines that own detached tasks
+(`routines.isActiveThread`, goal/pipeline-run threadIds) before they clear
+their in-flight maps on the same event; everything else is chat. No NDJSON
+needed: JSON ledger capped at 5000 rows / 365 rollup days — overflow rows
+collapse into daily rollups (day, turns, costUsd, byBot, bySource) so
+totals survive pruning. Route GET `/api/costs` → summary (today / 7d /
+all-time + turns, byBot sorted, bySource, byDay last 14, recent 50); SSE
+`{kind:"cost", summary}`. P7 judgment carried over: org-wide spend is an
+admin surface — the route is adminGate'd and cost SSE frames are filtered
+per-client to admins in org mode (solo mode fully open). UI:
+`CostsPage.tsx` (stat cards, per-bot bars with mascot avatars, per-source
+split, recent-turns table; members in org mode get an "admins only" note),
+activeView `"costs"`, Sidebar entry with today's-spend chip, store slice +
+SSE fold. Suite 43 files / 371 green (Node 24, isolated OMB_DATA_DIR),
+typecheck green. Evidence: `platform/web/screenshot-p8-costs.png`
+(isolated 8909 server, hand-seeded costs.json across 3 bots / 4 sources /
+7 days + a 63-turn rolled-up day — all-time total proves rollups count).
 
 ### P9 — Audit + Files
 - `server/audit.ts` + tests: append-only `audit.ndjson` written from the
