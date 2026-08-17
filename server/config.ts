@@ -104,6 +104,11 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
           codex: { driver: "codex" },
           antigravity: { driver: "antigravityAgent" },
           computer: { driver: "boxAgent" },
+          // API-key drivers for the agnostic fleet: show up unavailable until
+          // ANTHROPIC_API_KEY / OPENAI_COMPAT_BASE_URL+OPENAI_COMPAT_API_KEY
+          // exist in the environment — no CLI needed once they do.
+          anthropic: { driver: "anthropicApi" },
+          openaiCompat: { driver: "openaiCompat" },
         };
   for (const entry of Object.values(map)) {
     entry.environment = {

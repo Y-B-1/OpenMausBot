@@ -1,7 +1,9 @@
 // Built-in driver registration — upstream builtInDrivers.ts: a static
 // array, nothing more. Adding a driver = write drivers/<x>.ts, append.
 import type { AnyProviderDriver } from "../contracts.ts";
+import { AnthropicApiDriver } from "./anthropic-api.ts";
 import { AntigravityDriver } from "./antigravity.ts";
+import { OpenAICompatDriver } from "./openai-compat.ts";
 import { BoxAgentDriver } from "./boxagent.ts";
 import { ClaudeDriver } from "./claude.ts";
 import { CodexDriver } from "./codex.ts";
@@ -19,4 +21,6 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   CodexDriver,
   AntigravityDriver,
   BoxAgentDriver,
+  AnthropicApiDriver,
+  OpenAICompatDriver,
 ];
