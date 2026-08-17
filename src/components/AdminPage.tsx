@@ -1,9 +1,21 @@
-import { useState } from "react";
-import { LogOut, Plus, Shield, ShieldAlert, ShieldCheck, ScrollText, Trash2, User as UserIcon, Users } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  Download,
+  LogOut,
+  Plus,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  ScrollText,
+  Trash2,
+  Upload,
+  User as UserIcon,
+  Users,
+} from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import type { OrgTeam, OrgUser } from "@/lib/org";
-import { useStore } from "@/state/store";
+import { api, useStore } from "@/state/store";
 
 // Admin (P7): people & teams + the org-mode switch. Org mode is OPT-IN —
 // off, the app is today's solo/local OpenMausBot with no login anywhere.
@@ -142,6 +154,112 @@ function UserRow({ user, teams, isAdmin }: { user: OrgUser; teams: OrgTeam[]; is
         </div>
       )}
     </div>
+  );
+}
+
+// P11: the org's ported-feature data (inbox, goals, pipelines, memory,
+// connectors, people & teams, costs; audit + files index for the archive)
+// as one portable JSON bundle. No secrets ever: passwords, sessions and API
+// keys stay behind. Import only lands on an empty instance — the server
+// refuses otherwise, so nothing is silently merged or overwritten.
+function ExportImportSection() {
+  const { state } = useStore();
+  const orgOn = Boolean(state.org?.orgMode);
+  const isAdmin = !orgOn || state.orgMe?.role === "admin";
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  if (!isAdmin) return null;
+
+  const download = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const { bundle } = await api("/api/org-export");
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `openmausbot-org-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setNote("Exported — the download holds no passwords, sessions or API keys.");
+    } catch (err) {
+      setNote(`Export failed: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async (file: File) => {
+    setNote(null);
+    const text = await file.text();
+    if (
+      !window.confirm(
+        "Restore this bundle? It only works on an empty instance (no inbox, goals, pipelines, memory, connectors, people or costs yet) — the server refuses otherwise.",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const result = await api("/api/org-import", { method: "POST", body: text });
+      const counts = Object.entries(result.imported as Record<string, number>)
+        .filter(([, n]) => n > 0)
+        .map(([k, n]) => `${n} ${k}`)
+        .join(", ");
+      setNote(`Imported ${counts || "an empty bundle"} — reloading…`);
+      setTimeout(() => window.location.reload(), 900);
+    } catch (err) {
+      setNote(`Import refused: ${(err as Error).message}`);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section>
+      <div className="flex items-center gap-2">
+        <Download size={15} className="text-ink-secondary" />
+        <div className="text-[14px] font-semibold text-ink">Export & Import</div>
+        <div className="text-[12px] text-ink-secondary">— the org's data as one portable file</div>
+      </div>
+      <div className="mt-3 rounded-xl border border-hairline/50 bg-panel px-4 py-3.5">
+        <div className="text-[12.5px] leading-relaxed text-ink-secondary">
+          One JSON bundle with the inbox, goals, pipelines, shared memory, connectors, people & teams
+          and the cost ledger (plus the audit chain and file index for the archive). Passwords,
+          sessions and API keys are never included. Restoring only works into an empty instance.
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={download}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink transition-colors hover:bg-raised/70 disabled:opacity-50"
+          >
+            <Download size={14} />
+            Download export
+          </button>
+          <button
+            onClick={() => fileInput.current?.click()}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded-lg border border-hairline/60 bg-inset px-3 py-1.5 text-[13px] text-ink transition-colors hover:bg-raised/50 disabled:opacity-50"
+          >
+            <Upload size={14} />
+            Restore from file
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void restore(file);
+            }}
+          />
+        </div>
+        {note && <div className="mt-2.5 text-[12.5px] text-ink-secondary">{note}</div>}
+      </div>
+    </section>
   );
 }
 
@@ -415,6 +533,8 @@ export function AdminPage() {
               )}
             </div>
           </section>
+
+          <ExportImportSection />
             </>
           )}
         </div>
