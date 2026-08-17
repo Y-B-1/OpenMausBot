@@ -333,6 +333,22 @@ export class GoalManager {
     queueMicrotask(() => void this.tick());
   }
 
+  /** P11 export/import (see server/org-export.ts). */
+  exportState(): Goal[] {
+    return this.goals.map((g) => this.copy(g));
+  }
+
+  /** P11 import — only into an empty manager. Imported "running" goals land
+   * PAUSED: the exporting instance's bots/threads don't exist here, so a
+   * human resumes each goal deliberately instead of it auto-spawning turns. */
+  importState(data: unknown) {
+    if (this.goals.length) throw new Error("goals are not empty");
+    this.goals = (Array.isArray(data) ? (data as Goal[]) : []).map((g) =>
+      g.status === "running" ? { ...g, status: "paused" as const, threadId: undefined } : g,
+    );
+    this.save();
+  }
+
   private guardrailBreach(goal: Goal): string | null {
     const g = goal.guardrails;
     if (goal.sessions >= g.maxSessions) return `session cap reached (${g.maxSessions})`;

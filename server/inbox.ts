@@ -175,6 +175,19 @@ export class InboxManager {
     return { ...question, options: [...question.options] };
   }
 
+  /** P11 export/import (see server/org-export.ts). */
+  exportState(): { items: InboxItem[]; questions: InboxQuestion[] } {
+    return { items: this.items.map((i) => ({ ...i })), questions: this.questions.map((q) => ({ ...q })) };
+  }
+
+  /** P11 import — only into an empty inbox (org-export.ts enforces + documents). */
+  importState(data: { items?: unknown; questions?: unknown }) {
+    if (this.items.length || this.questions.length) throw new Error("inbox is not empty");
+    this.items = Array.isArray(data.items) ? (data.items as InboxItem[]) : [];
+    this.questions = Array.isArray(data.questions) ? (data.questions as InboxQuestion[]) : [];
+    this.save();
+  }
+
   private emitItem(item: InboxItem) {
     this.options.emit?.({ kind: "inbox.item", item: { ...item } });
   }

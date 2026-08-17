@@ -275,6 +275,22 @@ export class OrgConnectorManager {
     return { connector: this.get(id)!, ingested, skipped };
   }
 
+  /** P11 export/import (see server/org-export.ts). */
+  exportState(): OrgConnector[] {
+    return this.connectors.map((c) => ({ ...c, tools: c.tools.map((t) => ({ ...t })) }));
+  }
+
+  /** P11 import — only into an empty registry. Connectors land DISCONNECTED:
+   * connection state (and any future OAuth grant) is per-instance. */
+  importState(data: unknown) {
+    if (this.connectors.length) throw new Error("org connectors are not empty");
+    this.connectors = (Array.isArray(data) ? (data as OrgConnector[]) : []).map((c) => ({
+      ...c,
+      status: "disconnected" as const,
+    }));
+    this.save();
+  }
+
   private setStatus(id: string, status: OrgConnectorStatus): OrgConnector | null {
     const connector = this.connectors.find((candidate) => candidate.id === id);
     if (!connector) return null;

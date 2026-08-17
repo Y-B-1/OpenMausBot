@@ -40,6 +40,7 @@ import { OrgManager } from "./org.ts";
 import { CostManager } from "./costs.ts";
 import { AuditManager } from "./audit.ts";
 import { OrgFilesManager } from "./org-files.ts";
+import { applyBundle, buildBundle, type OrgExportDeps } from "./org-export.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -1310,6 +1311,40 @@ const server = createServer(async (req, res) => {
       const team = org.renameTeam(orgMatch[1], (await readBody(req)).name);
       if (team) audit.record({ actor: auditActor, action: "org.team.rename", subject: team.name });
       return team ? json(res, 200, { team }) : json(res, 404, { error: "no such team" });
+    }
+
+    // ── org export/import (P11) ─────────────────────────────────────────
+    // The org's ported-feature data as one portable JSON bundle. Secrets
+    // (passwords, sessions, config.json/API keys) are never in it; import is
+    // admin/solo-only and refuses unless the target sections are empty
+    // (semantics documented in server/org-export.ts). Upload rides the
+    // normal 1MB readBody cap — the bundle is metadata, not file bytes.
+    if (path === "/api/org-export" && method === "GET") {
+      if (adminGate()) return;
+      const deps: OrgExportDeps = { inbox, goals: goals!, pipelines: pipelines!, memory, orgConnectors, org, costs, orgFiles, audit };
+      audit.record({ actor: auditActor, action: "org.export", subject: "bundle" });
+      return json(res, 200, { bundle: buildBundle(deps) });
+    }
+    if (path === "/api/org-import" && method === "POST") {
+      if (adminGate()) return;
+      const body = await readBody(req);
+      const deps: OrgExportDeps = { inbox, goals: goals!, pipelines: pipelines!, memory, orgConnectors, org, costs, orgFiles, audit };
+      try {
+        const result = applyBundle(deps, body.bundle ?? body);
+        audit.record({
+          actor: auditActor,
+          action: "org.import",
+          subject: "bundle",
+          detail: Object.entries(result.imported)
+            .filter(([, n]) => n > 0)
+            .map(([k, n]) => `${k}:${n}`)
+            .join(" "),
+        });
+        return json(res, 200, result);
+      } catch (err) {
+        const e = err as Error & { status?: number };
+        return json(res, e.status ?? 400, { error: e.message });
+      }
     }
 
     // ── routines calendar ────────────────────────────────────────────────

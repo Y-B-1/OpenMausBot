@@ -405,6 +405,25 @@ export class PipelineManager {
     this.emitRun(run);
   }
 
+  /** P11 export/import (see server/org-export.ts). */
+  exportState(): { templates: PipelineTemplate[]; runs: PipelineRun[] } {
+    return { templates: this.templates.map((t) => this.copyTemplate(t)), runs: this.runs.map((r) => this.copyRun(r)) };
+  }
+
+  /** P11 import — only into an empty manager. In-flight runs (running /
+   * waiting_approval) land CANCELLED: their threads and approval tokens
+   * belong to the exporting instance and cannot resume here. */
+  importState(data: { templates?: unknown; runs?: unknown }) {
+    if (this.templates.length || this.runs.length) throw new Error("pipelines are not empty");
+    this.templates = Array.isArray(data.templates) ? (data.templates as PipelineTemplate[]) : [];
+    this.runs = (Array.isArray(data.runs) ? (data.runs as PipelineRun[]) : []).map((r) =>
+      r.status === "running" || r.status === "waiting_approval"
+        ? { ...r, status: "cancelled" as const, haltReason: "interrupted by export/import", approval: undefined }
+        : r,
+    );
+    this.save();
+  }
+
   private copyTemplate(template: PipelineTemplate): PipelineTemplate {
     return { ...template, steps: template.steps.map((step) => ({ ...step })) };
   }

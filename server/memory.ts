@@ -258,6 +258,18 @@ export class MemoryManager {
     }
   }
 
+  /** P11 export/import (see server/org-export.ts). */
+  exportState(): MemoryEntry[] {
+    return this.entries.map((e) => ({ ...e }));
+  }
+
+  /** P11 import — only into an empty memory store. */
+  importState(data: unknown) {
+    if (this.entries.length) throw new Error("memory is not empty");
+    this.entries = Array.isArray(data) ? (data as MemoryEntry[]) : [];
+    this.save();
+  }
+
   private insert(input: MemoryProposal, trustTier: TrustTier, source: MemorySource): MemoryEntry {
     const content = String(input.content ?? "").trim().slice(0, MAX_CONTENT);
     if (!content) throw new Error("Memory needs content");

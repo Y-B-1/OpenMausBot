@@ -248,6 +248,30 @@ export class OrgManager {
     return { isAdmin: user.role === "admin", teamIds: [...user.teamIds] };
   }
 
+  /** P11 export: users WITHOUT password records, and teams. Scrypt hashes
+   * are offline-crackable secrets and the relay set-on-first-use semantics
+   * make them unnecessary — an imported user simply sets a fresh password on
+   * first login. Session tokens are never exported. */
+  exportState(): { users: Array<Omit<OrgUser, "password">>; teams: OrgTeam[] } {
+    return {
+      users: this.users.map(({ password: _password, ...user }) => ({ ...user, teamIds: [...user.teamIds] })),
+      teams: this.teams.map((t) => ({ ...t })),
+    };
+  }
+
+  /** P11 import — only into an org with no users/teams yet. Does NOT touch
+   * orgMode or sessions: the importing human flips org mode on deliberately. */
+  importState(data: { users?: unknown; teams?: unknown }) {
+    if (this.users.length || this.teams.length) throw new Error("org already has users or teams");
+    this.teams = Array.isArray(data.teams) ? (data.teams as OrgTeam[]) : [];
+    const known = new Set(this.teams.map((t) => t.id));
+    this.users = (Array.isArray(data.users) ? (data.users as OrgUser[]) : []).map(
+      ({ password: _password, ...user }) => ({ ...user, teamIds: (user.teamIds ?? []).filter((t) => known.has(t)) }),
+    );
+    this.save();
+    this.emitState();
+  }
+
   private emitState() {
     this.options.emit?.({ kind: "org", state: this.state() });
   }

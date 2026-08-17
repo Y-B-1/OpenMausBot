@@ -206,6 +206,19 @@ export class CostManager {
     };
   }
 
+  /** P11 export/import (see server/org-export.ts). */
+  exportState(): { entries: CostEntry[]; rollups: CostRollup[] } {
+    return { entries: this.entries.map((e) => ({ ...e })), rollups: this.rollups.map((r) => ({ ...r })) };
+  }
+
+  /** P11 import — only into an empty ledger. */
+  importState(data: { entries?: unknown; rollups?: unknown }) {
+    if (this.entries.length || this.rollups.length) throw new Error("cost ledger is not empty");
+    this.entries = Array.isArray(data.entries) ? (data.entries as CostEntry[]) : [];
+    this.rollups = Array.isArray(data.rollups) ? (data.rollups as CostRollup[]) : [];
+    this.save();
+  }
+
   private save() {
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileAtomic(
