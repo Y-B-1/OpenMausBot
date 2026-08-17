@@ -11,6 +11,7 @@ import {
   Crown,
   EyeOff,
   FolderPlus,
+  Inbox,
   Loader2,
   Pencil,
   Pin,
@@ -615,6 +616,26 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-3 pb-3 pt-2">
+        <button
+          onClick={() => dispatch({ type: "showInbox" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "inbox" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Inbox size={20} className={state.activeView === "inbox" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Inbox</span>
+          {(() => {
+            const pending =
+              state.inboxItems.filter((item) => item.status === "open").length +
+              state.inboxQuestions.filter((question) => question.status === "pending").length;
+            return pending > 0 ? (
+              <span className="rounded-full bg-accent px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">
+                {pending}
+              </span>
+            ) : null;
+          })()}
+        </button>
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
           className={cn(

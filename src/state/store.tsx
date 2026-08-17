@@ -15,6 +15,7 @@ import {
 } from "react";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
+import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import { currentCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
 
@@ -203,9 +204,11 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines";
+  activeView: "chat" | "routines" | "inbox";
   routines: Routine[];
   routineRuns: RoutineRun[];
+  inboxItems: InboxItem[];
+  inboxQuestions: InboxQuestion[];
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
@@ -227,6 +230,12 @@ interface AppState {
 type Action =
   | { type: "hydrate"; bots: Bot[]; groups: Group[] }
   | { type: "showRoutines" }
+  | { type: "showInbox" }
+  | { type: "inboxHydrated"; items: InboxItem[]; questions: InboxQuestion[] }
+  | { type: "inboxItemPatched"; item: InboxItem }
+  | { type: "inboxQuestionPatched"; question: InboxQuestion }
+  | { type: "replyInboxItem"; itemId: string; reply: string }
+  | { type: "answerInboxQuestion"; questionId: string; answer: string }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -361,6 +370,50 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: action.runs };
+    case "showInbox":
+      return {
+        ...state,
+        activeView: "inbox",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "inboxHydrated":
+      return { ...state, inboxItems: action.items, inboxQuestions: action.questions };
+    case "inboxItemPatched": {
+      const exists = state.inboxItems.some((item) => item.id === action.item.id);
+      return {
+        ...state,
+        inboxItems: exists
+          ? state.inboxItems.map((item) => (item.id === action.item.id ? action.item : item))
+          : [action.item, ...state.inboxItems],
+      };
+    }
+    case "inboxQuestionPatched": {
+      const exists = state.inboxQuestions.some((q) => q.id === action.question.id);
+      return {
+        ...state,
+        inboxQuestions: exists
+          ? state.inboxQuestions.map((q) => (q.id === action.question.id ? action.question : q))
+          : [action.question, ...state.inboxQuestions],
+      };
+    }
+    // optimistic settle; the server's inbox.* patches confirm it later
+    case "replyInboxItem":
+      return {
+        ...state,
+        inboxItems: state.inboxItems.map((item) =>
+          item.id === action.itemId ? { ...item, status: "replied", reply: action.reply } : item,
+        ),
+      };
+    case "answerInboxQuestion":
+      return {
+        ...state,
+        inboxQuestions: state.inboxQuestions.map((q) =>
+          q.id === action.questionId ? { ...q, status: "answered", answer: action.answer } : q,
+        ),
+      };
     case "routinePatched": {
       const exists = state.routines.some((routine) => routine.id === action.routine.id);
       return {
@@ -686,6 +739,8 @@ const initialState: AppState = {
   activeView: "chat",
   routines: [],
   routineRuns: [],
+  inboxItems: [],
+  inboxQuestions: [],
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
@@ -819,6 +874,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "markRoutineRunSeen":
           api(`/api/routine-runs/${action.runId}/seen`, { method: "POST" }).catch(showError);
+          break;
+        case "replyInboxItem":
+          api(`/api/inbox/${action.itemId}/reply`, {
+            method: "POST",
+            body: JSON.stringify({ reply: action.reply }),
+          }).catch(showError);
+          break;
+        case "answerInboxQuestion":
+          api(`/api/inbox/questions/${action.questionId}/answer`, {
+            method: "POST",
+            body: JSON.stringify({ answer: action.answer }),
+          }).catch(showError);
           break;
         case "send":
           api(`/api/bots/${action.botId}/messages`, {
@@ -1052,6 +1119,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/routines")
         .then(({ routines, runs }) => alive && rawDispatch({ type: "routinesHydrated", routines, runs }))
         .catch(() => {});
+      api("/api/inbox")
+        .then(({ items, questions }) => alive && rawDispatch({ type: "inboxHydrated", items, questions }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -1137,6 +1207,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "routine.run":
           rawDispatch({ type: "routineRunPatched", run: frame.run });
+          break;
+        case "inbox.item":
+          rawDispatch({ type: "inboxItemPatched", item: frame.item });
+          break;
+        case "inbox.question":
+          rawDispatch({ type: "inboxQuestionPatched", question: frame.question });
           break;
         case "runtime": {
           const event = frame.event;

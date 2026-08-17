@@ -13,6 +13,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
+import { InboxPage } from "@/components/InboxPage";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
@@ -67,6 +68,8 @@ function Shell() {
       <Sidebar />
       {state.activeView === "routines" ? (
         <RoutinesPage />
+      ) : state.activeView === "inbox" ? (
+        <InboxPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
