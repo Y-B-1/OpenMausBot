@@ -137,3 +137,5 @@ owner input (keys/OAuth), scaffold around it, note it in §Blocked, move on.
 ### Blocked on owner
 - ANTHROPIC_API_KEY (E5 real runs)  - Foundry endpoint+key (E5 option)
 - M365 / Atlassian OAuth app credentials (E2 real sync)
+
+- 2026-08-17 pivot: upstream app is the product base; port plan in docs/platform/UPSTREAM-INTEGRATION.md (supersedes platform/-first sequencing here).
