@@ -17,6 +17,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import type { Goal, GoalInput } from "@/lib/goals";
+import type { MemoryAddInput, MemoryEntry } from "@/lib/memory";
 import type { PipelineRun, PipelineTemplate, TemplateInput } from "@/lib/pipelines";
 import { currentCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
@@ -206,7 +207,7 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
@@ -214,6 +215,7 @@ interface AppState {
   goals: Goal[];
   pipelineTemplates: PipelineTemplate[];
   pipelineRuns: PipelineRun[];
+  memoryEntries: MemoryEntry[];
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
@@ -258,6 +260,13 @@ type Action =
   | { type: "approvePipeline"; runId: string; token: string }
   | { type: "rejectPipeline"; runId: string; token: string }
   | { type: "cancelPipeline"; runId: string }
+  | { type: "showMemory" }
+  | { type: "memoryHydrated"; entries: MemoryEntry[] }
+  | { type: "memoryPatched"; entry: MemoryEntry }
+  | { type: "addMemory"; input: MemoryAddInput }
+  | { type: "reviewMemory"; entryId: string; verdict: "accept" | "reject" }
+  | { type: "promoteMemory"; entryId: string }
+  | { type: "retireMemory"; entryId: string }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -462,6 +471,54 @@ function reducer(state: AppState, action: Action): AppState {
         computerOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
+      };
+    case "showMemory":
+      return {
+        ...state,
+        activeView: "memory",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "memoryHydrated":
+      return { ...state, memoryEntries: action.entries };
+    case "memoryPatched": {
+      const exists = state.memoryEntries.some((entry) => entry.id === action.entry.id);
+      return {
+        ...state,
+        memoryEntries: exists
+          ? state.memoryEntries.map((entry) => (entry.id === action.entry.id ? action.entry : entry))
+          : [action.entry, ...state.memoryEntries],
+      };
+    }
+    case "addMemory":
+      return state; // the server's memory patch adds it
+    // optimistic transitions; the server's memory patches confirm them later
+    case "reviewMemory":
+      return {
+        ...state,
+        memoryEntries: state.memoryEntries.map((entry) =>
+          entry.id === action.entryId
+            ? action.verdict === "accept"
+              ? { ...entry, trustTier: "human_confirmed" }
+              : { ...entry, status: "retired" }
+            : entry,
+        ),
+      };
+    case "promoteMemory":
+      return {
+        ...state,
+        memoryEntries: state.memoryEntries.map((entry) =>
+          entry.id === action.entryId ? { ...entry, trustTier: "org_ratified" } : entry,
+        ),
+      };
+    case "retireMemory":
+      return {
+        ...state,
+        memoryEntries: state.memoryEntries.map((entry) =>
+          entry.id === action.entryId ? { ...entry, status: "retired" } : entry,
+        ),
       };
     case "pipelinesHydrated":
       return { ...state, pipelineTemplates: action.templates, pipelineRuns: action.runs };
@@ -854,6 +911,7 @@ const initialState: AppState = {
   goals: [],
   pipelineTemplates: [],
   pipelineRuns: [],
+  memoryEntries: [],
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
@@ -1011,6 +1069,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelGoal":
           api(`/api/goals/${action.goalId}/cancel`, { method: "POST" }).catch(showError);
+          break;
+        case "addMemory":
+          api("/api/memory", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
+          break;
+        case "reviewMemory":
+          api(`/api/memory/${action.entryId}/${action.verdict}`, { method: "POST" }).catch(showError);
+          break;
+        case "promoteMemory":
+          api(`/api/memory/${action.entryId}/promote`, { method: "POST" }).catch(showError);
+          break;
+        case "retireMemory":
+          api(`/api/memory/${action.entryId}`, { method: "DELETE" }).catch(showError);
           break;
         case "createPipelineTemplate":
           api("/api/templates", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
@@ -1277,6 +1347,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/pipelines")
         .then(({ templates, runs }) => alive && rawDispatch({ type: "pipelinesHydrated", templates, runs }))
         .catch(() => {});
+      api("/api/memory")
+        .then(({ entries }) => alive && rawDispatch({ type: "memoryHydrated", entries }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -1377,6 +1450,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "pipeline.run":
           rawDispatch({ type: "pipelineRunPatched", run: frame.run });
+          break;
+        case "memory":
+          rawDispatch({ type: "memoryPatched", entry: frame.entry });
           break;
         case "runtime": {
           const event = frame.event;

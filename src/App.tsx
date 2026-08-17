@@ -17,6 +17,7 @@ import { InboxPage } from "@/components/InboxPage";
 import { GoalsPage } from "@/components/GoalsPage";
 import { BoardPage } from "@/components/BoardPage";
 import { PipelinesPage } from "@/components/PipelinesPage";
+import { MemoryPage } from "@/components/MemoryPage";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
@@ -79,6 +80,8 @@ function Shell() {
         <BoardPage />
       ) : state.activeView === "pipelines" ? (
         <PipelinesPage />
+      ) : state.activeView === "memory" ? (
+        <MemoryPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (

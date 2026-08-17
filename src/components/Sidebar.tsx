@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   BellDot,
   Bot as BotIcon,
+  Brain,
   CalendarDays,
   Check,
   ClipboardCopy,
@@ -681,6 +682,26 @@ export function Sidebar() {
             return waiting > 0 ? (
               <span className="rounded-full bg-warning px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">
                 {waiting}
+              </span>
+            ) : null;
+          })()}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showMemory" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "memory" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Brain size={20} className={state.activeView === "memory" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Memory</span>
+          {(() => {
+            const pending = state.memoryEntries.filter(
+              (entry) => entry.status === "active" && ["quarantined", "agent_proposed"].includes(entry.trustTier),
+            ).length;
+            return pending > 0 ? (
+              <span className="rounded-full bg-warning px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">
+                {pending}
               </span>
             ) : null;
           })()}
