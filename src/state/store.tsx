@@ -18,6 +18,8 @@ import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import type { Goal, GoalInput } from "@/lib/goals";
 import type { CostSummary } from "@/lib/costs";
+import type { AuditEntry, AuditVerifyResult } from "@/lib/audit";
+import type { OrgFileMeta } from "@/lib/org-files";
 import type { MemoryAddInput, MemoryEntry } from "@/lib/memory";
 import type { OrgConnector, OrgConnectorInput, OrgProviderInfo } from "@/lib/org-connectors";
 import { orgToken, setOrgToken, type OrgRole, type OrgState, type OrgUser } from "@/lib/org";
@@ -210,7 +212,7 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors" | "admin" | "costs";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors" | "admin" | "costs" | "files";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
@@ -223,6 +225,11 @@ interface AppState {
   memoryEntries: MemoryEntry[];
   orgConnectors: OrgConnector[];
   orgConnectorCatalog: OrgProviderInfo[];
+  /** P9 audit log (admin surface in org mode) */
+  auditEntries: AuditEntry[];
+  auditVerify: AuditVerifyResult | null;
+  /** P9 shared files: uploads + read-only workspace artifacts */
+  orgFiles: OrgFileMeta[];
   /** P7 org mode. Null until /api/org answers; solo mode = {orgMode:false}. */
   org: OrgState | null;
   /** Who is logged in (org mode only; null in solo mode). */
@@ -263,6 +270,13 @@ type Action =
   | { type: "resumeGoal"; goalId: string }
   | { type: "cancelGoal"; goalId: string }
   | { type: "showCosts" }
+  | { type: "showFiles" }
+  | { type: "auditHydrated"; entries: AuditEntry[]; verify: AuditVerifyResult | null }
+  | { type: "auditEntryAdded"; entry: AuditEntry }
+  | { type: "orgFilesHydrated"; files: OrgFileMeta[] }
+  | { type: "orgFilePatched"; file: OrgFileMeta }
+  | { type: "uploadOrgFile"; input: { name: string; dataBase64: string; mime?: string; uploader?: string } }
+  | { type: "retireOrgFile"; fileId: string }
   | { type: "costsHydrated"; summary: CostSummary }
   | { type: "showPipelines" }
   | { type: "pipelinesHydrated"; templates: PipelineTemplate[]; runs: PipelineRun[] }
@@ -510,6 +524,42 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "costsHydrated":
       return { ...state, costs: action.summary };
+    case "showFiles":
+      return {
+        ...state,
+        activeView: "files",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "auditHydrated":
+      return { ...state, auditEntries: action.entries, auditVerify: action.verify };
+    case "auditEntryAdded":
+      return {
+        ...state,
+        auditEntries: state.auditEntries.some((entry) => entry.id === action.entry.id)
+          ? state.auditEntries
+          : [action.entry, ...state.auditEntries],
+      };
+    case "orgFilesHydrated":
+      return { ...state, orgFiles: action.files };
+    case "orgFilePatched": {
+      const exists = state.orgFiles.some((file) => file.id === action.file.id);
+      return {
+        ...state,
+        orgFiles: exists
+          ? state.orgFiles.map((file) => (file.id === action.file.id ? action.file : file))
+          : [action.file, ...state.orgFiles],
+      };
+    }
+    case "uploadOrgFile":
+      return state; // the server's org_file event adds it
+    case "retireOrgFile":
+      return {
+        ...state,
+        orgFiles: state.orgFiles.map((file) => (file.id === action.fileId ? { ...file, retired: true } : file)),
+      };
     case "showPipelines":
       return {
         ...state,
@@ -1026,6 +1076,9 @@ const initialState: AppState = {
   inboxQuestions: [],
   goals: [],
   costs: null,
+  auditEntries: [],
+  auditVerify: null,
+  orgFiles: [],
   pipelineTemplates: [],
   pipelineRuns: [],
   memoryEntries: [],
@@ -1297,6 +1350,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ name: action.name, enabled: action.enabled }),
           }).catch(showError);
           break;
+        case "uploadOrgFile":
+          api("/api/org-files", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
+          break;
+        case "retireOrgFile":
+          api(`/api/org-files/${encodeURIComponent(action.fileId)}`, { method: "DELETE" }).catch(showError);
+          break;
         case "createPipelineTemplate":
           api("/api/templates", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
           break;
@@ -1563,6 +1622,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .then(({ summary }) => alive && rawDispatch({ type: "costsHydrated", summary }))
         .catch(() => {}); // members get a 403 in org mode — the page explains
 
+      api("/api/audit")
+        .then(({ entries, verify }) => alive && rawDispatch({ type: "auditHydrated", entries, verify: verify ?? null }))
+        .catch(() => {}); // members get a 403 in org mode — the tab explains
+      api("/api/org-files")
+        .then(({ files }) => alive && rawDispatch({ type: "orgFilesHydrated", files }))
+        .catch(() => {});
       api("/api/pipelines")
         .then(({ templates, runs }) => alive && rawDispatch({ type: "pipelinesHydrated", templates, runs }))
         .catch(() => {});
@@ -1695,6 +1760,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "org":
           rawDispatch({ type: "orgPatched", org: frame.state });
+          break;
+        case "audit":
+          rawDispatch({ type: "auditEntryAdded", entry: frame.entry });
+          break;
+        case "org_file":
+          rawDispatch({ type: "orgFilePatched", file: frame.file });
           break;
         case "org_connector":
           rawDispatch({ type: "orgConnectorPatched", connector: frame.connector });

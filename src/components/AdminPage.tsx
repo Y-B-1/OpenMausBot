@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LogOut, Plus, Shield, ShieldCheck, Trash2, User as UserIcon, Users } from "lucide-react";
+import { LogOut, Plus, Shield, ShieldAlert, ShieldCheck, ScrollText, Trash2, User as UserIcon, Users } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import type { OrgTeam, OrgUser } from "@/lib/org";
@@ -145,6 +145,107 @@ function UserRow({ user, teams, isAdmin }: { user: OrgUser; teams: OrgTeam[]; is
   );
 }
 
+function AuditTab() {
+  const { state } = useStore();
+  const orgOn = Boolean(state.org?.orgMode);
+  const isAdmin = !orgOn || state.orgMe?.role === "admin";
+  const [filter, setFilter] = useState("");
+  const verify = state.auditVerify;
+  const groups = [...new Set(state.auditEntries.map((e) => e.action.split(".")[0]))].sort();
+  const entries = filter
+    ? state.auditEntries.filter((e) => e.action === filter || e.action.startsWith(filter + "."))
+    : state.auditEntries;
+
+  if (!isAdmin) {
+    return (
+      <div className="rounded-xl border border-dashed border-hairline/60 px-4 py-8 text-center text-[13px] text-ink-secondary">
+        The audit log is admins-only while org mode is on.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* chain-verification badge: the whole point of the hash chain */}
+      <div
+        className={cn(
+          "flex items-center gap-2.5 rounded-xl border px-4 py-3",
+          verify?.valid
+            ? "border-success/30 bg-success/10"
+            : "border-danger/40 bg-danger/10",
+        )}
+      >
+        {verify?.valid ? (
+          <ShieldCheck size={17} className="text-success" />
+        ) : (
+          <ShieldAlert size={17} className="text-danger" />
+        )}
+        <div className="text-[13px] text-ink">
+          {verify == null
+            ? "Verifying the hash chain…"
+            : verify.valid
+              ? `Chain verified — ${verify.length} entries, each hash-linked to the one before. Tampering with any entry would break the chain here.`
+              : `CHAIN BROKEN at entry ${verify.brokenAt?.index} (${verify.brokenAt?.reason}) — the log was altered after the fact.`}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setFilter("")}
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[11.5px] transition-colors",
+            !filter ? "bg-accent/15 text-accent" : "bg-raised text-ink-secondary hover:text-ink",
+          )}
+        >
+          All
+        </button>
+        {groups.map((group) => (
+          <button
+            key={group}
+            onClick={() => setFilter(filter === group ? "" : group)}
+            className={cn(
+              "rounded-full px-2.5 py-1 text-[11.5px] transition-colors",
+              filter === group ? "bg-accent/15 text-accent" : "bg-raised text-ink-secondary hover:text-ink",
+            )}
+          >
+            {group}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        {entries.map((entry) => (
+          <div key={entry.id} className="flex items-center gap-3 rounded-xl border border-hairline/50 bg-panel px-3.5 py-2">
+            <span className="w-40 shrink-0 truncate rounded-md bg-raised px-2 py-0.5 text-[11.5px] font-medium text-ink">
+              {entry.action}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
+              {entry.subject}
+              {entry.detail && <span className="text-ink-secondary"> — {entry.detail}</span>}
+            </span>
+            <span className="shrink-0 text-[11.5px] text-ink-secondary">{entry.actor}</span>
+            <span
+              className="shrink-0 font-mono text-[10.5px] text-ink-secondary/60"
+              title={`hash ${entry.hash}
+prev ${entry.prevHash}`}
+            >
+              {entry.hash.slice(0, 8)}
+            </span>
+            <span className="w-24 shrink-0 text-right text-[11.5px] tabular-nums text-ink-secondary">
+              {new Date(entry.ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </div>
+        ))}
+        {entries.length === 0 && (
+          <div className="rounded-xl border border-dashed border-hairline/60 px-4 py-8 text-center text-[13px] text-ink-secondary">
+            Nothing recorded yet. Consequential actions — goals, gates, connectors, memory review, files — land here as a tamper-evident chain.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AdminPage() {
   const { state, dispatch } = useStore();
   const org = state.org;
@@ -152,6 +253,7 @@ export function AdminPage() {
   const isAdmin = !orgOn || state.orgMe?.role === "admin";
   const [newUser, setNewUser] = useState("");
   const [newTeam, setNewTeam] = useState("");
+  const [tab, setTab] = useState<"people" | "audit">("people");
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app">
@@ -171,10 +273,35 @@ export function AdminPage() {
               )}
             </div>
             <div className="mt-1 text-[12.5px] text-ink-secondary">
-              People, teams and the org-mode switch.
+              People, teams, the org-mode switch and the audit log.
             </div>
           </div>
 
+          <div className="flex items-center gap-1.5">
+            {(
+              [
+                { id: "people", label: "People & Teams", Icon: Users },
+                { id: "audit", label: "Audit log", Icon: ScrollText },
+              ] as const
+            ).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] transition-colors",
+                  tab === id ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+                )}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {tab === "audit" ? (
+            <AuditTab />
+          ) : (
+            <>
           <OrgModeCard />
 
           {/* People & Teams */}
@@ -288,6 +415,8 @@ export function AdminPage() {
               )}
             </div>
           </section>
+            </>
+          )}
         </div>
       </div>
     </main>

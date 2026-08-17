@@ -13,6 +13,7 @@ import {
   Copy,
   Crown,
   EyeOff,
+  FolderOpen,
   FolderPlus,
   Inbox,
   Kanban,
@@ -703,6 +704,24 @@ export function Sidebar() {
               ${state.costs.totals.todayUsd.toFixed(2)}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showFiles" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "files" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <FolderOpen size={20} className={state.activeView === "files" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Files</span>
+          {(() => {
+            const shared = state.orgFiles.filter((file) => file.source === "upload" && !file.retired).length;
+            return shared > 0 ? (
+              <span className="rounded-full bg-raised px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-ink-secondary">
+                {shared}
+              </span>
+            ) : null;
+          })()}
         </button>
         <button
           onClick={() => dispatch({ type: "showMemory" })}

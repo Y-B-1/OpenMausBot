@@ -21,6 +21,7 @@ import { MemoryPage } from "@/components/MemoryPage";
 import { OrgConnectorsPage } from "@/components/OrgConnectorsPage";
 import { AdminPage } from "@/components/AdminPage";
 import { CostsPage } from "@/components/CostsPage";
+import { FilesPage } from "@/components/FilesPage";
 import { LoginGate } from "@/components/LoginGate";
 import { orgToken } from "@/lib/org";
 import { NoEngines } from "@/components/NoEngines";
@@ -99,6 +100,8 @@ function Shell() {
         <AdminPage />
       ) : state.activeView === "costs" ? (
         <CostsPage />
+      ) : state.activeView === "files" ? (
+        <FilesPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
