@@ -337,8 +337,31 @@ tiers/sources incl. a supersede chain + 4-item review queue; live
 - Verify: vitest — proposal lands quarantined, accept promotes, reject
   retires; connector-sourced entries gated (used by P6).
 
-### P6 — Connectors registry + mock sync
-- New `server/platform-connectors.ts` + tests (port catalog + mock sync
+### P6 — Connectors registry + mock sync ✅ DONE
+(commits c972fbe server, be47da7 UI, evidence commit follows)
+Shipped: `server/org-connectors.ts` + `org-connectors.test.ts` (13 tests) —
+`OrgConnectorManager` (manager pattern, `org-connectors.json`): 8-provider
+catalog (sharepoint/onedrive/teams/outlook/confluence/jira/databricks/github),
+add/configure with server-enforced access levels (memory kind strictly
+read_only whatever was requested; agent kind read_only|write_no_delete,
+anything else falls back to read_only — never delete), connect/disconnect
+(mock; real OAuth deferred until owner supplies credentials), per-tool enable
+toggles, remove (synced memory stays). Mock sync (connected memory-kind only)
+ingests sampleItems via new `MemoryManager.ingestConnector` — org_ratified
+source-"connector" entries, idempotent by provenance author + content
+(re-sync skips, never duplicates); systems of record are trusted, review is
+for agent claims. Routes under `/api/org-connectors` (named "org connectors"
+— upstream's `/api/connectors` is Composio and untouched); SSE
+`org_connector`/`org_connector_removed`. UI: `OrgConnectorsPage.tsx` two-pane
+(add-from-catalog with kind picker, status pills, access/last-sync/item-count
+stat cards, tool switches, Sync now), activeView `"connectors"`, Sidebar
+Cable entry with connected-count badge, store slice + SSE folds. Suite 41
+files / 349 green (Node 24, isolated OMB_DATA_DIR), typecheck green.
+Evidence: `platform/web/screenshot-p6-connectors.png` (isolated 8905 server,
+4 connectors, GitHub agent detail with a toggled-off tool) +
+`screenshot-p6-memory-synced.png` (Memory page, Connectors source filter,
+8 ratified synced entries visible end to end).
+- New `server/org-connectors.ts` + tests (port catalog + mock sync
   from `platform/server/connectors.ts`; sync emits memory proposals into
   P5's queue). NOTE: upstream already owns `/api/connectors` (Composio) —
   new routes go under `/api/org-connectors` to avoid any collision; do not
