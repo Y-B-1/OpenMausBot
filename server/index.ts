@@ -32,6 +32,7 @@ import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { RoutineManager, type RoutineRunOn } from "./routines.ts";
 import { InboxManager } from "./inbox.ts";
+import { GoalManager } from "./goals.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -166,6 +167,7 @@ const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> 
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
 let routines: RoutineManager | null = null;
+let goals: GoalManager | null = null;
 // Cross-bot inbox: agent-posted items + blocking questions, mirrored from
 // live provider asks so nothing waits unseen behind an unselected bot.
 const inbox = new InboxManager({ emit: broadcast });
@@ -178,6 +180,7 @@ let localVmLifecycleBusy = false;
 bus.subscribe((event: RuntimeEvent) => {
   broadcast({ kind: "runtime", event });
   routines?.handleRuntimeEvent(event);
+  goals?.handleRuntimeEvent(event);
   const bot = store.botByThread(event.threadId);
   const group = bot ? undefined : store.groupByThread(event.threadId);
   if (!bot && !group) return;
@@ -722,6 +725,32 @@ routines = new RoutineManager({
 });
 routines.start();
 
+// ── goals: guardrailed multi-session loops over an existing bot ────────
+// The goal loop owns iteration and hard stops; each session is a normal
+// bot turn in the goal's detached task, so approvals, tools and blocking
+// questions (mirrored into the Inbox) all behave exactly like manual work.
+goals = new GoalManager({
+  emit: broadcast,
+  botState: (botId) => {
+    const bot = store.bot(botId);
+    return !bot ? "missing" : bot.busy ? "busy" : "ready";
+  },
+  createTask: (botId, title) => {
+    const task = store.createTask(botId, title, false);
+    const bot = store.bot(botId);
+    if (task && bot) broadcast({ kind: "bot", bot: publicBot(bot) });
+    return task;
+  },
+  startTurn: (botId, threadId, prompt, onDispatchError) =>
+    startTurn(botId, prompt, { threadId, onDispatchError }),
+  interruptTurn: async (botId, threadId) => {
+    const bot = store.bot(botId);
+    const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
+    await instance?.adapter.interruptTurn(threadId);
+  },
+});
+goals.start();
+
 // ── config hot-reload ─────────────────────────────────────────────────
 // ── group turn engine ──────────────────────────────────────────────────
 // Room messages go to the configured default responder unless the user
@@ -1130,6 +1159,24 @@ const server = createServer(async (req, res) => {
       }
       const question = inbox.answerQuestion(pending.id, answer);
       return question ? json(res, 200, { question }) : json(res, 404, { error: "no such question" });
+    }
+
+    // ── goals: guardrailed multi-session bot loops ───────────────────────
+    if (path === "/api/goals" && method === "GET") {
+      return json(res, 200, { goals: goals!.list() });
+    }
+    if (path === "/api/goals" && method === "POST") {
+      return json(res, 201, { goal: goals!.create(await readBody(req)) });
+    }
+    const goalMatch = path.match(/^\/api\/goals\/([\w-]+)\/(pause|resume|cancel)$/);
+    if (goalMatch && method === "POST") {
+      const goal =
+        goalMatch[2] === "pause"
+          ? goals!.pause(goalMatch[1])
+          : goalMatch[2] === "resume"
+            ? goals!.resume(goalMatch[1])
+            : await goals!.cancel(goalMatch[1]);
+      return goal ? json(res, 200, { goal }) : json(res, 404, { error: "no such goal in that state" });
     }
 
     // ── events stream ──
