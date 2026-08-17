@@ -435,7 +435,39 @@ typecheck green. Evidence: `platform/web/screenshot-p8-costs.png`
 (isolated 8909 server, hand-seeded costs.json across 3 bots / 4 sources /
 7 days + a 63-turn rolled-up day — all-time total proves rollups count).
 
-### P9 — Audit + Files
+### P9 — Audit + Files ✅ DONE
+(commits 728781f managers, 0325bee wiring, 26effe6 UI, evidence commit follows)
+Shipped: `server/audit.ts` + `audit.test.ts` (7 tests) — `AuditManager`
+(buzz-audit hash chain): NDJSON append-only log (`audit.ndjson` — append-only
+file matches append-only chain; a torn tail is reported, not hidden), entries
+{ts, actor, action, subject, detail?, prevHash, hash: sha256(prevHash +
+canonical fields)} from GENESIS; `verify()` walks the chain and pinpoints the
+first tampered (recomputed-hash mismatch) or deleted (broken link) entry;
+rotation at 2000 entries keeps the newest half with the head prevHash trusted
+(rotated file re-verifies). Instrumented at the route sites of every
+consequential mutation (org mode/user/team, connector
+add/configure/connect/sync/tool/remove, memory accept/reject/promote/retire/
+team-scope, goal create/pause/resume/cancel, template create, pipeline
+approve/reject/cancel incl. the inbox-gate path, file add/retire) with actor
+= P7 actingUser else "you" (solo mode is the local human; engine-side
+guardrail halts land as "system" via a new `GoalManager.onHalted` hook).
+Routes GET `/api/audit` (?action= dot-prefix filter, includes verify) +
+`/api/audit/verify`, adminGate'd like costs; SSE `{kind:"audit"}` filtered to
+admins in org mode. `server/org-files.ts` + tests (4) — investigation:
+upstream has NO server file storage (composer attachments are client-side
+text embeds); CLI drivers do write `DATA_DIR/workspaces/<tag>` — so uploads
+are base64 JSON (fits the 1MB readBody cap ⇒ 700KB/file), stored under
+`DATA_DIR/org-files/<id>` + index json, delete is soft RETIRE (bytes stay),
+and workspaces are indexed READ-ONLY (traversal-guarded download, never
+retirable). UI: `FilesPage.tsx` (type icons, size/uploader/ts, download w/
+token, upload button, workspace section), Admin gets tabs (People & Teams |
+Audit log) with a chain-verified/CHAIN BROKEN badge, action-prefix filter
+chips, hash prefixes per row; activeView `"files"`, Sidebar FolderOpen entry
+with shared-count badge, store slices + SSE folds. Suite 45 files / 382
+green (Node 24, isolated OMB_DATA_DIR), typecheck green. Evidence:
+`platform/web/screenshot-p9-audit.png` (isolated 8911 server — 11 verified
+entries incl. a LIVE goal.halt "session cap" from a real $0.38 claude turn)
++ `screenshot-p9-files.png` (2 uploads + read-only workspace artifact).
 - `server/audit.ts` + tests: append-only `audit.ndjson` written from the
   same bus subscription (P8's hook) + explicit `record()` calls added in
   the NEW modules only (inbox/goals/pipelines/memory/teams). Route
