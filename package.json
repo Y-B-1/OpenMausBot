@@ -33,6 +33,7 @@
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
     "check:electron": "node --check electron/main.mjs && node --check electron/terminal-launch.mjs && node --check electron/preload.cjs && node --check electron/capabilities.cjs && node --check electron/cua-connection.cjs && node --check electron/cua.mjs && node --check electron/speech.mjs",
     "preview": "vite preview",
+    "app:equitios": "electron electron/atrium.mjs",
     "build:server": "tsc -p tsconfig.server.build.json",
     "build:speech": "node electron/build-speech-helper.mjs",
     "build:cua": "node scripts/prepare-cua.mjs",

@@ -26,6 +26,7 @@ Update it every iteration; mark DONE with commit hashes.
 - [x] (0472fa3) Cross-room flow: chat header 'Promote to goal' pre-selects the channel; inbox/question cards deep-link 'Open the room this came from'.
 - [x] (f3f4271) Group chat polish: typing/turn indicators (PendingBubble), roster presence chips (responding…/idle from pendingTurns).
 - [x] (312def4) Task board view (Board nav): todo/doing/needs-you/done columns from goals+pipelines, cards deep-link.
+- [x] Mac app shell: electron/atrium.mjs desktop shell ("equitiOS") — attaches to a running relay on 8900 or spawns one (Node >=22.6 resolver: ATRIUM_NODE → nvm highest → PATH), data dir ~/Library/Application Support/equitiOS, `pnpm app:equitios`.
 
 ### E2 — Connectors (the owner's memory vision)
 - [x] (044c8d9) Connector registry: record = {provider (microsoft365, sharepoint,
