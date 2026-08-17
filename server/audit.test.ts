@@ -100,7 +100,7 @@ describe("audit recording from instrumented routes", () => {
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: (await res.json()) as any };
   };
 
   beforeAll(async () => {

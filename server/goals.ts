@@ -73,6 +73,8 @@ export interface GoalManagerOptions {
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string) => Promise<void>;
+  /** P9 audit hook: called when a guardrail (or missing bot) halts a goal */
+  onHalted?: (goal: Goal) => void;
 }
 
 const DEFAULT_GUARDRAILS: GoalGuardrails = {
@@ -348,6 +350,7 @@ export class GoalManager {
     goal.updatedAt = goal.finishedAt;
     this.save();
     this.emitGoal(goal);
+    if (status === "halted") this.options.onHalted?.(this.copy(goal));
   }
 
   private copy(goal: Goal): Goal {

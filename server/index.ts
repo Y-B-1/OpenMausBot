@@ -38,6 +38,8 @@ import { MemoryManager, visibleToViewer, type MemoryViewer } from "./memory.ts";
 import { OrgConnectorManager } from "./org-connectors.ts";
 import { OrgManager } from "./org.ts";
 import { CostManager } from "./costs.ts";
+import { AuditManager } from "./audit.ts";
+import { OrgFilesManager } from "./org-files.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -167,7 +169,8 @@ function broadcast(payload: unknown) {
       : null;
   // P8: spend is admin-only in org mode — cost frames must not leak to
   // members through the shared stream (mirrors the memory team walls).
-  const adminOnly = org.enabled && kind === "cost";
+  // P9: the audit log is an admin surface like costs.
+  const adminOnly = org.enabled && (kind === "cost" || kind === "audit");
   for (const res of [...sseClients]) {
     if (walled?.teamId && !visibleToViewer(walled, sseViewers.get(res))) continue;
     if (adminOnly && sseViewers.get(res)?.isAdmin === false) continue;
@@ -221,6 +224,13 @@ const costs = new CostManager({
     return "chat";
   },
 });
+// Audit log (P9): hash-chained, append-only record of consequential
+// mutations across the ported features. Routes call audit.record() at the
+// mutation site; engine-side halts arrive through manager hooks.
+const audit = new AuditManager({ emit: broadcast });
+// Org files (P9): artifacts humans share or agents produce; soft delete,
+// driver workspaces indexed read-only.
+const orgFiles = new OrgFilesManager({ emit: broadcast });
 // The Local VM is intentionally one shared, visible desktop. Two agents
 // driving it simultaneously would mix clicks, keystrokes and screenshots,
 // so only one thread may lease it at a time.
@@ -810,6 +820,8 @@ goals = new GoalManager({
     const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
     await instance?.adapter.interruptTurn(threadId);
   },
+  onHalted: (goal) =>
+    audit.record({ action: "goal.halt", subject: goal.name, detail: goal.haltReason }),
 });
 goals.start();
 
@@ -1196,6 +1208,9 @@ const server = createServer(async (req, res) => {
       json(res, 403, { error: "admin only" });
       return true;
     };
+    // P9 audit: who did it — the P7 identity when there is one, else the
+    // local human at the keyboard (solo mode has no login to name).
+    const auditActor = actingUser?.name ?? "you";
     if (path === "/api/login" && method === "POST") {
       const body = await readBody(req);
       try {
@@ -1225,6 +1240,7 @@ const server = createServer(async (req, res) => {
         // Turning org mode OFF is admin-only (when it is on at all).
         if (adminGate()) return;
         org.setMode(false);
+        audit.record({ actor: auditActor, action: "org.mode", subject: "off" });
         return json(res, 200, { org: org.state() });
       }
       // Turning it ON from solo mode: whoever flips the switch names
@@ -1237,6 +1253,7 @@ const server = createServer(async (req, res) => {
       try {
         const session = org.login(body.name ?? "Admin", body.password);
         org.setMode(true);
+        audit.record({ actor: String(body.name ?? "Admin"), action: "org.mode", subject: "on" });
         return json(res, 200, { ...session, org: org.state() });
       } catch (err) {
         const e = err as Error & { status?: number };
@@ -1247,7 +1264,9 @@ const server = createServer(async (req, res) => {
       if (adminGate()) return;
       const body = await readBody(req);
       try {
-        return json(res, 201, { user: org.publicUser(org.createUser(body.name, body.role)) });
+        const user = org.createUser(body.name, body.role);
+        audit.record({ actor: auditActor, action: "org.user.create", subject: user.name, detail: user.role });
+        return json(res, 201, { user: org.publicUser(user) });
       } catch (err) {
         return json(res, 400, { error: String((err as Error).message ?? err) });
       }
@@ -1260,12 +1279,22 @@ const server = createServer(async (req, res) => {
         orgMatch[2] === "role"
           ? org.setRole(orgMatch[1], body.role)
           : org.setUserTeams(orgMatch[1], body.teamIds);
+      if (user) {
+        audit.record({
+          actor: auditActor,
+          action: `org.user.${orgMatch[2]}`,
+          subject: user.name,
+          detail: orgMatch[2] === "role" ? String(body.role) : (body.teamIds ?? []).join(","),
+        });
+      }
       return user ? json(res, 200, { user: org.publicUser(user) }) : json(res, 404, { error: "no such user" });
     }
     if (path === "/api/org/teams" && method === "POST") {
       if (adminGate()) return;
       try {
-        return json(res, 201, { team: org.createTeam((await readBody(req)).name) });
+        const team = org.createTeam((await readBody(req)).name);
+        audit.record({ actor: auditActor, action: "org.team.create", subject: team.name });
+        return json(res, 201, { team });
       } catch (err) {
         return json(res, 400, { error: String((err as Error).message ?? err) });
       }
@@ -1274,11 +1303,12 @@ const server = createServer(async (req, res) => {
     if (orgMatch && (method === "PATCH" || method === "DELETE")) {
       if (adminGate()) return;
       if (method === "DELETE") {
-        return org.deleteTeam(orgMatch[1])
-          ? json(res, 200, { ok: true })
-          : json(res, 404, { error: "no such team" });
+        const deleted = org.deleteTeam(orgMatch[1]);
+        if (deleted) audit.record({ actor: auditActor, action: "org.team.delete", subject: orgMatch[1] });
+        return deleted ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such team" });
       }
       const team = org.renameTeam(orgMatch[1], (await readBody(req)).name);
+      if (team) audit.record({ actor: auditActor, action: "org.team.rename", subject: team.name });
       return team ? json(res, 200, { team }) : json(res, 404, { error: "no such team" });
     }
 
@@ -1346,10 +1376,17 @@ const server = createServer(async (req, res) => {
         // Mirrored pipeline gate: the answer text decides the gate; the
         // manager's onGateResolved settles this question for every client.
         const runId = pending.threadId.slice("pipeline:".length);
-        const run = /^\s*approve/i.test(answer)
+        const approved = /^\s*approve/i.test(answer);
+        const run = approved
           ? pipelines!.approve(runId, pending.requestId)
           : pipelines!.reject(runId, pending.requestId);
         if (!run) return json(res, 409, { error: "that gate is no longer pending" });
+        audit.record({
+          actor: auditActor,
+          action: approved ? "pipeline.approve" : "pipeline.reject",
+          subject: run.name,
+          detail: "via inbox",
+        });
         return json(res, 200, { question: inbox.question(pending.id) });
       }
       if (pending.threadId && pending.requestId) {
@@ -1379,7 +1416,9 @@ const server = createServer(async (req, res) => {
     if (path === "/api/goals" && method === "POST") {
       // P7: creating autonomous work (spend) is admin-only in org mode.
       if (adminGate()) return;
-      return json(res, 201, { goal: goals!.create(await readBody(req)) });
+      const goal = goals!.create(await readBody(req));
+      audit.record({ actor: auditActor, action: "goal.create", subject: goal.name });
+      return json(res, 201, { goal });
     }
     const goalMatch = path.match(/^\/api\/goals\/([\w-]+)\/(pause|resume|cancel)$/);
     if (goalMatch && method === "POST") {
@@ -1389,6 +1428,7 @@ const server = createServer(async (req, res) => {
           : goalMatch[2] === "resume"
             ? goals!.resume(goalMatch[1])
             : await goals!.cancel(goalMatch[1]);
+      if (goal) audit.record({ actor: auditActor, action: `goal.${goalMatch[2]}`, subject: goal.name });
       return goal ? json(res, 200, { goal }) : json(res, 404, { error: "no such goal in that state" });
     }
 
@@ -1399,6 +1439,64 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { summary: costs.summary() });
     }
 
+    // ── audit: hash-chained log of consequential mutations (P9) ──────────
+    if (path === "/api/audit" && method === "GET") {
+      // Like costs: the org-wide audit trail is an admin surface in org mode.
+      if (adminGate()) return;
+      const limitParam = Number(url.searchParams.get("limit"));
+      return json(res, 200, {
+        entries: audit.list({
+          action: url.searchParams.get("action") ?? undefined,
+          ...(Number.isFinite(limitParam) && limitParam > 0 ? { limit: limitParam } : {}),
+        }),
+        verify: audit.verify(),
+      });
+    }
+    if (path === "/api/audit/verify" && method === "GET") {
+      if (adminGate()) return;
+      return json(res, 200, audit.verify());
+    }
+
+    // ── org files: shared artifacts, soft delete, workspace index (P9) ───
+    if (path === "/api/org-files" && method === "GET") {
+      return json(res, 200, { files: orgFiles.list() });
+    }
+    if (path === "/api/org-files" && method === "POST") {
+      const body = await readBody(req);
+      try {
+        const file = orgFiles.add({ ...body, uploader: body.uploader ?? actingUser?.name });
+        audit.record({
+          actor: typeof body.botId === "string" && body.botId ? body.botId : auditActor,
+          action: "file.add",
+          subject: file.name,
+          detail: `${file.size} bytes`,
+        });
+        return json(res, 201, { file });
+      } catch (err) {
+        return json(res, 400, { error: String((err as Error).message ?? err) });
+      }
+    }
+    const orgFileMatch = path.match(/^\/api\/org-files\/([\w.:/-]+?)(\/download)?$/);
+    if (orgFileMatch && method === "GET" && orgFileMatch[2]) {
+      const content = orgFiles.contentFor(decodeURIComponent(orgFileMatch[1]));
+      if (!content) return json(res, 404, { error: "no such file" });
+      try {
+        const data = readFileSync(content.path);
+        res.writeHead(200, {
+          "content-type": content.meta.mime,
+          "content-disposition": `attachment; filename="${content.meta.name.replace(/"/g, "")}"`,
+        });
+        return res.end(data);
+      } catch {
+        return json(res, 404, { error: "file content missing" });
+      }
+    }
+    if (orgFileMatch && method === "DELETE" && !orgFileMatch[2]) {
+      const file = orgFiles.retire(decodeURIComponent(orgFileMatch[1]));
+      if (file) audit.record({ actor: auditActor, action: "file.retire", subject: file.name });
+      return file ? json(res, 200, { file }) : json(res, 404, { error: "no such file" });
+    }
+
     // ── pipelines: templated step runs with approval gates ───────────────
     if (path === "/api/templates" && method === "GET") {
       return json(res, 200, { templates: pipelines!.listTemplates() });
@@ -1406,7 +1504,9 @@ const server = createServer(async (req, res) => {
     if (path === "/api/templates" && method === "POST") {
       // P7: creating autonomous work (spend) is admin-only in org mode.
       if (adminGate()) return;
-      return json(res, 201, { template: pipelines!.createTemplate(await readBody(req)) });
+      const template = pipelines!.createTemplate(await readBody(req));
+      audit.record({ actor: auditActor, action: "pipeline.template.create", subject: template.name });
+      return json(res, 201, { template });
     }
     if (path === "/api/pipelines" && method === "GET") {
       return json(res, 200, { templates: pipelines!.listTemplates(), runs: pipelines!.listRuns() });
@@ -1425,6 +1525,7 @@ const server = createServer(async (req, res) => {
           : pipelineMatch[2] === "approve"
             ? pipelines!.approve(pipelineMatch[1], String(body.token ?? ""))
             : pipelines!.reject(pipelineMatch[1], String(body.token ?? ""));
+      if (run) audit.record({ actor: auditActor, action: `pipeline.${pipelineMatch[2]}`, subject: run.name });
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such run in that state" });
     }
 
@@ -1466,6 +1567,7 @@ const server = createServer(async (req, res) => {
       const teamId = typeof body.teamId === "string" && body.teamId ? body.teamId : null;
       if (teamId && org.enabled && !org.team(teamId)) return json(res, 404, { error: "no such team" });
       const entry = memory.setTeam(memoryTeamMatch[1], teamId);
+      if (entry) audit.record({ actor: auditActor, action: "memory.team", subject: entry.id, detail: teamId ?? "org-wide" });
       return entry ? json(res, 200, { entry }) : json(res, 404, { error: "no such entry" });
     }
     const memoryMatch = path.match(/^\/api\/memory\/([\w-]+)(?:\/(accept|reject|promote))?$/);
@@ -1480,6 +1582,10 @@ const server = createServer(async (req, res) => {
             : memoryMatch[2] === "accept" || memoryMatch[2] === "reject"
               ? memory.review(memoryMatch[1], memoryMatch[2])
               : null;
+      if (entry) {
+        const verb = method === "DELETE" ? "retire" : memoryMatch[2]!;
+        audit.record({ actor: auditActor, action: `memory.${verb}`, subject: entry.id, detail: entry.content.slice(0, 80) });
+      }
       return entry ? json(res, 200, { entry }) : json(res, 404, { error: "no such entry in that state" });
     }
 
@@ -1493,7 +1599,9 @@ const server = createServer(async (req, res) => {
     if (path === "/api/org-connectors" && method === "POST") {
       if (adminGate()) return; // connectors config is an admin act (P7)
       try {
-        return json(res, 201, { connector: orgConnectors.add(await readBody(req)) });
+        const connector = orgConnectors.add(await readBody(req));
+        audit.record({ actor: auditActor, action: "connector.add", subject: connector.provider, detail: connector.kind });
+        return json(res, 201, { connector });
       } catch (err) {
         return json(res, 400, { error: String((err as Error).message ?? err) });
       }
@@ -1504,19 +1612,37 @@ const server = createServer(async (req, res) => {
       const id = orgConnMatch[1]!;
       if (method === "DELETE") {
         const removed = orgConnectors.remove(id);
+        if (removed) audit.record({ actor: auditActor, action: "connector.remove", subject: removed.provider });
         return removed ? json(res, 200, { connector: removed }) : json(res, 404, { error: "no such connector" });
       }
       if (method === "PATCH" && !orgConnMatch[2]) {
         const connector = orgConnectors.configure(id, await readBody(req));
+        if (connector) audit.record({ actor: auditActor, action: "connector.configure", subject: connector.provider });
         return connector ? json(res, 200, { connector }) : json(res, 404, { error: "no such connector" });
       }
       if (method === "POST" && orgConnMatch[2] === "tools") {
         const body = await readBody(req);
         const connector = orgConnectors.setTool(id, String(body.name ?? ""), Boolean(body.enabled));
+        if (connector) {
+          audit.record({
+            actor: auditActor,
+            action: "connector.tool",
+            subject: connector.provider,
+            detail: `${String(body.name ?? "")} ${body.enabled ? "on" : "off"}`,
+          });
+        }
         return connector ? json(res, 200, { connector }) : json(res, 404, { error: "no such connector or tool" });
       }
       if (method === "POST" && orgConnMatch[2] === "sync") {
         const result = orgConnectors.sync(id);
+        if (result) {
+          audit.record({
+            actor: auditActor,
+            action: "connector.sync",
+            subject: result.connector.provider,
+            detail: `${result.ingested} new entries`,
+          });
+        }
         return result
           ? json(res, 200, result)
           : json(res, 409, { error: "sync needs a connected memory-kind connector" });
@@ -1524,6 +1650,7 @@ const server = createServer(async (req, res) => {
       if (method === "POST" && (orgConnMatch[2] === "connect" || orgConnMatch[2] === "disconnect")) {
         const connector =
           orgConnMatch[2] === "connect" ? orgConnectors.connect(id) : orgConnectors.disconnect(id);
+        if (connector) audit.record({ actor: auditActor, action: `connector.${orgConnMatch[2]}`, subject: connector.provider });
         return connector ? json(res, 200, { connector }) : json(res, 404, { error: "no such connector" });
       }
     }
