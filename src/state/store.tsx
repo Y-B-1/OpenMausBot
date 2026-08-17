@@ -205,7 +205,7 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
@@ -239,6 +239,7 @@ type Action =
   | { type: "replyInboxItem"; itemId: string; reply: string }
   | { type: "answerInboxQuestion"; questionId: string; answer: string }
   | { type: "showGoals" }
+  | { type: "showBoard" }
   | { type: "goalsHydrated"; goals: Goal[] }
   | { type: "goalPatched"; goal: Goal }
   | { type: "createGoal"; input: GoalInput }
@@ -427,6 +428,15 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeView: "goals",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "showBoard":
+      return {
+        ...state,
+        activeView: "board",
         settingsOpen: false,
         computerOpen: false,
         appSettingsOpen: false,

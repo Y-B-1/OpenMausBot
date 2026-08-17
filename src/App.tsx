@@ -15,6 +15,7 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { InboxPage } from "@/components/InboxPage";
 import { GoalsPage } from "@/components/GoalsPage";
+import { BoardPage } from "@/components/BoardPage";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
@@ -73,6 +74,8 @@ function Shell() {
         <InboxPage />
       ) : state.activeView === "goals" ? (
         <GoalsPage />
+      ) : state.activeView === "board" ? (
+        <BoardPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (

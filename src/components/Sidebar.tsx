@@ -12,6 +12,7 @@ import {
   EyeOff,
   FolderPlus,
   Inbox,
+  Kanban,
   Target,
   Loader2,
   Pencil,
@@ -654,6 +655,16 @@ export function Sidebar() {
               </span>
             ) : null;
           })()}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showBoard" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "board" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Kanban size={20} className={state.activeView === "board" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Board</span>
         </button>
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
