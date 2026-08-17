@@ -70,7 +70,7 @@ describe("set-on-first-use passwords (scrypt)", () => {
     expect(() => org.login("Yosri", "wrong")).toThrow(/invalid password/);
     const { user } = org.login("Yosri", "hunter2");
     expect(user.hasPassword).toBe(true);
-    expect((user as Record<string, unknown>).password).toBeUndefined();
+    expect((user as unknown as Record<string, unknown>).password).toBeUndefined();
   });
 });
 

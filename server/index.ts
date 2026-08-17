@@ -34,8 +34,9 @@ import { RoutineManager, type RoutineRunOn } from "./routines.ts";
 import { InboxManager } from "./inbox.ts";
 import { GoalManager } from "./goals.ts";
 import { PipelineManager } from "./pipelines.ts";
-import { MemoryManager } from "./memory.ts";
+import { MemoryManager, visibleToViewer, type MemoryViewer } from "./memory.ts";
 import { OrgConnectorManager } from "./org-connectors.ts";
+import { OrgManager } from "./org.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -144,15 +145,31 @@ const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
   tasks: store.tasks(bot.id).map(({ resumeCursors, ...task }) => task),
 });
 
+// Org mode (P7): OPT-IN users/teams/roles. Off by default — the local
+// single-user app keeps working with no login anywhere. When enabled, API
+// requests need a session token and team walls apply to shared memory.
+// (`broadcast` is a hoisted function declaration, so the reference is safe.)
+const org = new OrgManager({ emit: broadcast });
+
 // ── SSE fan-out to clients ─────────────────────────────────────────────
 const sseClients = new Set<ServerResponse>();
+// P7: each SSE client's memory-wall viewer (null = sees everything). Only
+// consulted while org mode is on — team-scoped memory entries must not leak
+// to other teams through the shared event stream.
+const sseViewers = new Map<ServerResponse, MemoryViewer | null>();
 function broadcast(payload: unknown) {
   const frame = `data: ${JSON.stringify(payload)}\n\n`;
+  const walled =
+    org.enabled && (payload as { kind?: string; entry?: { teamId?: string } })?.kind === "memory"
+      ? (payload as { entry: Parameters<typeof visibleToViewer>[0] }).entry
+      : null;
   for (const res of [...sseClients]) {
+    if (walled?.teamId && !visibleToViewer(walled, sseViewers.get(res))) continue;
     try {
       res.write(frame);
     } catch {
       sseClients.delete(res);
+      sseViewers.delete(res);
     }
   }
 }
@@ -478,6 +495,9 @@ async function startTurn(
      * of merely mounting that VM's computer tools on the MAUS's provider. */
     runOn?: RoutineRunOn;
     onDispatchError?: (message: string) => void;
+    /** P7 team walls: who triggered this turn. Null/absent (solo mode,
+     * routines, goals, pipelines, bot-to-bot) = all memory visible. */
+    viewer?: MemoryViewer | null;
   },
 ) {
   const bot = store.bot(botId);
@@ -551,7 +571,7 @@ async function startTurn(
 
   // Accepted shared memory relevant to this turn rides along as wrapped
   // reference DATA (never instructions); proposals never inject.
-  const memoryBlock = memory.contextBlock(text);
+  const memoryBlock = memory.contextBlock(text, opts?.viewer);
 
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
@@ -1141,6 +1161,106 @@ const server = createServer(async (req, res) => {
       return json(res, 404, { error: "unknown internal endpoint" });
     }
 
+    // ── org mode seam (P7) ───────────────────────────────────────────────
+    // Off (the default): actingUser stays null, nothing below changes — the
+    // solo/local app never sees a login. On: /api/* needs a session token
+    // (Authorization: Bearer, or ?token= for EventSource); the login route,
+    // a minimal org status probe, health, and static files stay open.
+    const actingUser = org.userForRequest(req, url);
+    const actingViewer = org.viewerFor(actingUser);
+    const isOrgAdmin = !org.enabled || actingUser?.role === "admin";
+    /** 403 unless solo mode or the acting user is an admin. */
+    const adminGate = (): boolean => {
+      if (isOrgAdmin) return false;
+      json(res, 403, { error: "admin only" });
+      return true;
+    };
+    if (path === "/api/login" && method === "POST") {
+      const body = await readBody(req);
+      try {
+        return json(res, 200, { ...org.login(body.name, body.password), org: org.state() });
+      } catch (err) {
+        const e = err as Error & { status?: number };
+        return json(res, e.status ?? 400, { error: e.message });
+      }
+    }
+    if (path === "/api/logout" && method === "POST") {
+      const auth = req.headers.authorization ?? "";
+      if (auth.startsWith("Bearer ")) org.logout(auth.slice(7));
+      return json(res, 200, { ok: true });
+    }
+    if (path === "/api/org" && method === "GET") {
+      // Unauthenticated in org mode: reveal only that a login is needed.
+      if (org.enabled && !actingUser) return json(res, 200, { orgMode: true, users: [], teams: [] });
+      return json(res, 200, { ...org.state(), me: actingUser ? org.publicUser(actingUser) : null });
+    }
+    if (org.enabled && !actingUser && path.startsWith("/api/") && path !== "/api/health") {
+      return json(res, 401, { error: "unauthorized — log in first" });
+    }
+    if (path === "/api/org/mode" && method === "POST") {
+      const body = await readBody(req);
+      const enable = Boolean(body.enabled);
+      if (!enable) {
+        // Turning org mode OFF is admin-only (when it is on at all).
+        if (adminGate()) return;
+        org.setMode(false);
+        return json(res, 200, { org: org.state() });
+      }
+      // Turning it ON from solo mode: whoever flips the switch names
+      // themselves and becomes the first user (= admin, first-user rule);
+      // their session comes back so the UI never locks them out.
+      if (org.enabled) {
+        if (adminGate()) return;
+        return json(res, 200, { org: org.state() });
+      }
+      try {
+        const session = org.login(body.name ?? "Admin", body.password);
+        org.setMode(true);
+        return json(res, 200, { ...session, org: org.state() });
+      } catch (err) {
+        const e = err as Error & { status?: number };
+        return json(res, e.status ?? 400, { error: e.message });
+      }
+    }
+    if (path === "/api/org/users" && method === "POST") {
+      if (adminGate()) return;
+      const body = await readBody(req);
+      try {
+        return json(res, 201, { user: org.publicUser(org.createUser(body.name, body.role)) });
+      } catch (err) {
+        return json(res, 400, { error: String((err as Error).message ?? err) });
+      }
+    }
+    let orgMatch = path.match(/^\/api\/org\/users\/([\w-]+)\/(role|teams)$/);
+    if (orgMatch && method === "POST") {
+      if (adminGate()) return;
+      const body = await readBody(req);
+      const user =
+        orgMatch[2] === "role"
+          ? org.setRole(orgMatch[1], body.role)
+          : org.setUserTeams(orgMatch[1], body.teamIds);
+      return user ? json(res, 200, { user: org.publicUser(user) }) : json(res, 404, { error: "no such user" });
+    }
+    if (path === "/api/org/teams" && method === "POST") {
+      if (adminGate()) return;
+      try {
+        return json(res, 201, { team: org.createTeam((await readBody(req)).name) });
+      } catch (err) {
+        return json(res, 400, { error: String((err as Error).message ?? err) });
+      }
+    }
+    orgMatch = path.match(/^\/api\/org\/teams\/([\w-]+)$/);
+    if (orgMatch && (method === "PATCH" || method === "DELETE")) {
+      if (adminGate()) return;
+      if (method === "DELETE") {
+        return org.deleteTeam(orgMatch[1])
+          ? json(res, 200, { ok: true })
+          : json(res, 404, { error: "no such team" });
+      }
+      const team = org.renameTeam(orgMatch[1], (await readBody(req)).name);
+      return team ? json(res, 200, { team }) : json(res, 404, { error: "no such team" });
+    }
+
     // ── routines calendar ────────────────────────────────────────────────
     if (path === "/api/routines" && method === "GET") {
       const fromParam = url.searchParams.get("from");
@@ -1236,6 +1356,8 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { goals: goals!.list() });
     }
     if (path === "/api/goals" && method === "POST") {
+      // P7: creating autonomous work (spend) is admin-only in org mode.
+      if (adminGate()) return;
       return json(res, 201, { goal: goals!.create(await readBody(req)) });
     }
     const goalMatch = path.match(/^\/api\/goals\/([\w-]+)\/(pause|resume|cancel)$/);
@@ -1254,12 +1376,16 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { templates: pipelines!.listTemplates() });
     }
     if (path === "/api/templates" && method === "POST") {
+      // P7: creating autonomous work (spend) is admin-only in org mode.
+      if (adminGate()) return;
       return json(res, 201, { template: pipelines!.createTemplate(await readBody(req)) });
     }
     if (path === "/api/pipelines" && method === "GET") {
       return json(res, 200, { templates: pipelines!.listTemplates(), runs: pipelines!.listRuns() });
     }
     if (path === "/api/pipelines" && method === "POST") {
+      // P7: creating autonomous work (spend) is admin-only in org mode.
+      if (adminGate()) return;
       return json(res, 201, { run: pipelines!.startRun(await readBody(req)) });
     }
     const pipelineMatch = path.match(/^\/api\/pipelines\/([\w-]+)\/(approve|reject|cancel)$/);
@@ -1276,22 +1402,48 @@ const server = createServer(async (req, res) => {
 
     // ── memory: tiered shared memory with a human review queue ───────────
     if (path === "/api/memory" && method === "GET") {
-      return json(res, 200, { entries: memory.list() });
+      return json(res, 200, { entries: memory.list(actingViewer) });
     }
     if (path === "/api/memory/search" && method === "GET") {
-      return json(res, 200, { entries: memory.search(url.searchParams.get("q") ?? "") });
+      return json(res, 200, { entries: memory.search(url.searchParams.get("q") ?? "", 8, actingViewer) });
     }
     if (path === "/api/memory/propose" && method === "POST") {
       return json(res, 201, { entry: memory.propose(await readBody(req)) });
     }
     if (path === "/api/memory" && method === "POST") {
       const body = await readBody(req);
+      // Team scoping on add: admins may wall an entry behind any team,
+      // members only behind a team they belong to (solo mode: anything).
+      if (
+        typeof body.teamId === "string" &&
+        body.teamId &&
+        !isOrgAdmin &&
+        !(actingUser?.teamIds ?? []).includes(body.teamId)
+      ) {
+        return json(res, 403, { error: "you can only scope memory to your own teams" });
+      }
       return json(res, 201, {
-        entry: memory.add({ ...body, author: String(body.author ?? "you"), sessionRef: "ui" }),
+        entry: memory.add({
+          ...body,
+          author: String(body.author ?? actingUser?.name ?? "you"),
+          sessionRef: "ui",
+        }),
       });
+    }
+    // P7: admins partition memory between teams (scope / un-scope an entry).
+    const memoryTeamMatch = path.match(/^\/api\/memory\/([\w-]+)\/team$/);
+    if (memoryTeamMatch && method === "POST") {
+      if (adminGate()) return;
+      const body = await readBody(req);
+      const teamId = typeof body.teamId === "string" && body.teamId ? body.teamId : null;
+      if (teamId && org.enabled && !org.team(teamId)) return json(res, 404, { error: "no such team" });
+      const entry = memory.setTeam(memoryTeamMatch[1], teamId);
+      return entry ? json(res, 200, { entry }) : json(res, 404, { error: "no such entry" });
     }
     const memoryMatch = path.match(/^\/api\/memory\/([\w-]+)(?:\/(accept|reject|promote))?$/);
     if (memoryMatch && (method === "POST" || method === "DELETE")) {
+      // Org-wide ratification is an admin act when org mode is on.
+      if (memoryMatch[2] === "promote" && adminGate()) return;
       const entry =
         method === "DELETE"
           ? memory.retire(memoryMatch[1])
@@ -1311,6 +1463,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { connectors: orgConnectors.list() });
     }
     if (path === "/api/org-connectors" && method === "POST") {
+      if (adminGate()) return; // connectors config is an admin act (P7)
       try {
         return json(res, 201, { connector: orgConnectors.add(await readBody(req)) });
       } catch (err) {
@@ -1319,6 +1472,7 @@ const server = createServer(async (req, res) => {
     }
     const orgConnMatch = path.match(/^\/api\/org-connectors\/([\w-]+)(?:\/(connect|disconnect|sync|tools))?$/);
     if (orgConnMatch && (method === "POST" || method === "PATCH" || method === "DELETE")) {
+      if (adminGate()) return; // connectors config is an admin act (P7)
       const id = orgConnMatch[1]!;
       if (method === "DELETE") {
         const removed = orgConnectors.remove(id);
@@ -1355,6 +1509,7 @@ const server = createServer(async (req, res) => {
       });
       res.write(`data: ${JSON.stringify({ kind: "hello" })}\n\n`);
       sseClients.add(res);
+      sseViewers.set(res, actingViewer); // P7: memory team walls on the stream
       const keepalive = setInterval(() => {
         try {
           res.write(": keepalive\n\n");
@@ -1363,6 +1518,7 @@ const server = createServer(async (req, res) => {
       req.on("close", () => {
         clearInterval(keepalive);
         sseClients.delete(res);
+        sseViewers.delete(res);
       });
       return;
     }
@@ -1562,7 +1718,7 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
-      await startTurn(m[1], text);
+      await startTurn(m[1], text, { viewer: actingViewer });
       return json(res, 202, { ok: true });
     }
 
@@ -1596,7 +1752,7 @@ const server = createServer(async (req, res) => {
       store.patchBot(bot.id, { rewound: true });
       broadcast({ kind: "message", threadId: bot.threadId, message });
       broadcast({ kind: "thread", threadId: bot.threadId, activeLeafId: message.id });
-      await startTurn(bot.id, text, { userMessage: message });
+      await startTurn(bot.id, text, { userMessage: message, viewer: actingViewer });
       return json(res, 202, { ok: true });
     }
 
