@@ -5,7 +5,35 @@
 > **Update discipline:** same commit as the work it describes. **Prune:**
 > ≤200 lines; archive to `docs/agent-memory/`, never delete.
 
-## Current state — 2026-08-16 (batch 2 close)
+## Current state — 2026-08-17 (upstream port COMPLETE: P0–P12)
+
+The pivot (§Binding decisions 2026-08-18) is executed: every platform/
+feature is ported INTO the upstream app following upstream patterns.
+`docs/platform/UPSTREAM-INTEGRATION.md` has the pass-by-pass record — all
+P0–P12 ticked with commits + screenshot evidence (`platform/web/
+screenshot-p*.png`). Surfaces live in the app: Inbox+questions, Goals with
+guardrails, Board, Pipelines with approval gates, Memory (tiers/review/
+team walls), Org connectors + mock sync, Org mode (opt-in auth/teams/
+roles/admin), Costs ledger, hash-chained Audit, Files, anthropic-api +
+openai-compat drivers, Org export/import, e2e walkthrough.
+- Suite: 48 files, 401 passed / 8 skipped, 0 failed; typecheck green.
+  Run per `docs/platform/UPSTREAM-TEST-BASELINE.md`: Node 24
+  (`~/.nvm/versions/node/v24.14.0/bin`), SHORT isolated
+  `OMB_DATA_DIR=/tmp/omb-test-data corepack pnpm test`.
+- Run the app: `corepack pnpm dev:server` (8799) + `corepack pnpm dev`
+  (5199) or `pnpm dev:desktop`. Seed the demo story: `pnpm demo:org`
+  (safe: seeded bots get no driver unless `--instance` is passed).
+  Full browser e2e on an isolated stack: `pnpm e2e:org` (18 asserts,
+  exit 0 = green; needs Chrome; never touches the live dev stack).
+- BLOCKED ON OWNER (carried forward): ANTHROPIC_API_KEY (live validation
+  of the anthropic-api driver + agent-sdk runner), Foundry keys,
+  M365/Atlassian OAuth creds (real connector syncs). Foundry/managed
+  drivers stay parked (decision OPEN).
+- Known follow-ups: group sends + background turns (routines/goals/
+  pipelines) run with a null memory viewer (P7 note); real connector
+  OAuth; Foundry-vs-Anthropic decision.
+
+## Earlier state — 2026-08-16 (batch 2 close)
 
 Research COMPLETE: 10 briefings in `docs/platform/research/`, all red-teamed
 (`docs/platform/RED-TEAM.md`, 9 fact-check agents, 4 refuted claims patched

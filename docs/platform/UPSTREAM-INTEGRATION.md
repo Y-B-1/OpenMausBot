@@ -557,12 +557,36 @@ a fresh data dir, imported {1 item, 1 question, 1 goal→paused, 1 template,
 1 memory, 1 connector, Sara+Finance}, both refusal cases exercised, target
 chain verified valid).
 
-### P12 — E2E walkthrough
-- Port `platform/scripts/e2e-demo.mjs` to drive the UPSTREAM server API
-  (question → goal → pipeline gate → connector sync → memory promote →
-  costs → audit) as `scripts/e2e-platform.mjs`; add to docs, not CI.
-- Verify: script exits 0 against a scratch `OMB_DATA_DIR`; `pnpm test`
-  green; update `docs/AGENT-MEMORY.md` in the closing commit.
+### P12 — E2E walkthrough ✅ DONE
+(commits d456d59 seeder, 7383978 walkthrough, docs commit follows)
+Shipped: `scripts/demo-seed.mjs` (`pnpm demo:org`) — idempotent "Acme
+Digital" seeder against any running server (--base). Driver-pinned safety:
+seeded bots get an explicit `--instance` or NO driver at all, so seeding can
+never spawn a real provider session; without an instance the done/paused
+goals are skipped (unreachable without a driver) and the halted goal halts
+on the stuck guardrail after failed dispatches. Costs have no write API (the
+ledger is a bus tee over real turns) — skipped live, filled organically in
+the walkthrough. `scripts/e2e-walkthrough.mjs` (`pnpm e2e:org`) — boots an
+ISOLATED stack (scratch short OMB_DATA_DIR, own port, OMB_STATIC_DIR=dist,
+never touches 8799/5199) whose config.json `instances` map contains ONLY an
+in-process mock Anthropic Messages endpoint (replacing the default fleet
+makes a real claude session impossible while turns stay real-but-free with
+computed costs), seeds with `--instance acme-mock`, then drives Chrome via
+playwright-core (email gate pre-set) and hard-asserts 18 checks: sidebar
+Work/Knowledge/Admin groups; inbox items + answering the pending question
+settles it (verified via API + Done tab); board cards in 4 columns; goal
+guardrail meters + halted goal's halt reason; approving the gated pipeline
+run advances it to Done; memory stat strip, review Accept → Confirmed,
+search filtering, superseded strikethrough; connector status pills + tool
+toggle flip (API-verified); 2 files listed; costs stat cards + per-bot bars
+($0.09 real computed mock spend over 7 turns); audit chain-verified badge;
+org-export bundle non-empty with all sections. Org mode OFF throughout
+(solo walkthrough; org mode proven in P7). Hard-won: the seeder must run as
+an ASYNC child — spawnSync would block the event loop hosting the mock
+endpoint and deadlock every turn. Exit-bar evidence: e2e exit 0 / 18
+asserts; suite 48 files, 401 passed / 8 skipped, 0 failed; typecheck green
+(Node 24, isolated OMB_DATA_DIR). Evidence:
+`platform/web/screenshot-p12-walkthrough.png` (Board, all columns live).
 
 ### Risks
 1. **Persistence mismatch** — resolved: adapter/add (see §2); the global
