@@ -246,7 +246,21 @@ halted the loop at 3/3.
   checklist + guardrail meters, sidebar button.
 - Verify: vitest — criterion completion → done; each guardrail → halted.
 
-### P3 — Board
+### P3 — Board ✅ DONE
+(commits 67098a5 selector, 6bac70c UI, screenshot+tick commit follows)
+Shipped: `src/lib/board.ts` pure selector (+5 vitest) — columns Queued /
+In progress / Waiting on human / Done / Halted computed from client state
+only: busy bots' active tasks → In progress; goals running→In progress,
+paused→Queued, done→Done, halted→Waiting (guardrail stop needs a human),
+cancelled→Halted; pending inbox questions + open items → Waiting; routine
+runs queued→Queued, running|waiting→In progress, completed→Done,
+failed|cancelled|missed→Halted. `BoardPage.tsx` kanban (upstream tokens,
+per-column counts, cards click through via existing dispatches: select /
+showGoals / showInbox / showRoutines), activeView `"board"`, Sidebar entry.
+No server changes. Suite 38 files / 311 green, typecheck green. Evidence:
+`platform/web/screenshot-p3-board.png` (isolated 8899 server, seeded goals
+across all statuses + inbox item + question; the running goal spawned a
+REAL claude session, so a live busy-task card appears in In progress).
 - Derived view, no new server state: `src/components/BoardPage.tsx`
   (activeView `"board"`) — kanban columns computed from bots' tasks, goals
   (P2) and pipelines (P4 — column appears then). Port layout from
