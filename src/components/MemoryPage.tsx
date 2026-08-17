@@ -88,7 +88,9 @@ function TeamScopeSelect({ entry }: { entry: MemoryEntry }) {
 }
 
 function EntryCard({ entry }: { entry: MemoryEntry }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  // ratifying for the whole org is an admin act once org mode is on
+  const canRatify = !state.org?.orgMode || state.orgMe?.role === "admin";
   return (
     <div
       className={cn(
@@ -113,7 +115,7 @@ function EntryCard({ entry }: { entry: MemoryEntry }) {
         {entry.status === "retired" && <span className="text-[11px] text-ink-secondary/60">retired</span>}
         <span className="ml-auto flex items-center gap-1">
           {entry.status === "active" && <TeamScopeSelect entry={entry} />}
-          {entry.status === "active" && entry.trustTier === "human_confirmed" && (
+          {entry.status === "active" && entry.trustTier === "human_confirmed" && canRatify && (
             <button
               onClick={() => dispatch({ type: "promoteMemory", entryId: entry.id })}
               title="Promote to org-ratified"

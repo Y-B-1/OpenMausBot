@@ -370,7 +370,35 @@ Evidence: `platform/web/screenshot-p6-connectors.png` (isolated 8905 server,
   (`ConnectorsPage.tsx`).
 - Verify: vitest — create → sync → entries appear quarantined in memory.
 
-### P7 — Teams, roles, admin (auth adapter)
+### P7 — Teams, roles, admin (auth adapter) ✅ DONE
+(commits 8305e8c server managers, 1f196cc index seam, e9a6e86 UI, evidence
+commit follows)
+Shipped: `server/org.ts` + `org.test.ts` (12 tests) — `OrgManager`
+(manager pattern, `org.json`): OPT-IN org mode (off by default = today's
+solo app, zero login), users (first created OR first to log in = admin),
+scrypt set-on-first-use passwords (relay semantics: wrong password after
+set → 401), persisted restart-safe session tokens, teams CRUD-lite with
+membership on `user.teamIds`. `server/index.ts` seam: org mode OFF →
+actingUser null, nothing changes (suite untouched: 43 files / 371 green);
+ON → /api/* needs Bearer token (?token= for EventSource), open allowlist =
+login/minimal org probe/health/static. Admin gates: org users/teams/mode,
+all org-connector mutations, memory promote + team-scoping, goals/template/
+pipeline create (autonomous spend). TEAM WALLS: `MemoryEntry.teamId` +
+`MemoryViewer` filtering in memory list/search AND turn injection
+(`startTurn` viewer opt threaded from the send/edit routes; no user context
+= all visible) AND per-SSE-client filtering so walled entries never leak on
+the shared stream (+5 wall tests). UI: `AdminPage.tsx` (org-mode switch w/
+plain-language explanation, people w/ role toggle + team chips, teams w/
+member chips), `LoginGate` (only when org mode on + no session),
+Memory team-scope selector (admin), activeView `"admin"`, Sidebar
+ShieldCheck entry, auth-aware `api()`/EventSource. Members-can't: verified
+live (403 admin acts, walled entry absent from list/search). Evidence:
+`platform/web/screenshot-p7-admin.png`, `screenshot-p7-login.png`,
+`screenshot-p7-member-memory.png` (isolated 8907 server — Sara, Sales,
+sees the org handbook but NOT the Finance-walled entry). Follow-up
+documented: group sends and background turns (routines/goals/pipelines)
+run with a null viewer (all memory visible to the bot) — per-user identity
+threading through those engines is a later pass.
 - Risk #2: upstream has NO auth. Port scrypt+session login from relay.ts as
   an OPT-IN middleware: new `server/auth.ts` + tests; disabled by default
   (`config.auth.enabled`), so the local single-user app keeps working and
