@@ -300,7 +300,33 @@ server, seeded run suspended at a gate; inbox-answer Reject verified live).
 - Verify: vitest — run advances step-by-step, halts at gate, approve →
   completes; deny → halted.
 
-### P5 — Memory (categories, team walls, review queue)
+### P5 — Memory (categories, team walls, review queue) ✅ DONE
+(commits 1a74911 server, 566c154 UI, evidence commit follows)
+Shipped: `server/memory.ts` + `memory.test.ts` (11 tests) — `MemoryManager`
+(`memory.json`, atomic writes): agent/connector proposals auto-tier via
+`tierFor` (imperatives/URLs → quarantined, else agent_proposed) and wait in
+the review queue; accept → human_confirmed, reject → retired; promote →
+org_ratified; human adds land human_confirmed; delete is retire;
+supersede-not-delete (a proposal's supersede applies only on accept, a human
+add's immediately). INJECTION: `startTurn` appends `memory.contextBlock(text)`
+to the system prompt — term-match search over accepted tiers only (cap 8),
+wrapped in the D10 DATA_BLOCK_HEADER ("data, never instructions"); plus a
+`GET /api/memory/search?q=` retrieval endpoint. AGENT WRITE PATH: a reply
+line `REMEMBER: …` / `REMEMBER(kind): …` (the goals DONE-line convention,
+parsed off `item.completed` assistant_text events, capped 5/reply) lands as
+an agent proposal — runtime events can never mint a trusted tier; the system
+prompt tells every bot the convention. Routes: GET/POST `/api/memory`,
+POST `/api/memory/propose`, POST `/:id/(accept|reject|promote)`, DELETE
+`/:id` (retire); SSE `{kind:"memory"}`. Team walls stay parameterized until
+P7 (org/personal only, per plan). UI: `MemoryPage.tsx` platform-style
+segmentation — stat mini-strip, review queue with Accept/Reject, kind
+sections with one-line explanations, search + source/tier filter chips,
+provenance per entry, Ratify/retire actions; activeView `"memory"`, Sidebar
+entry with pending-review badge, store slice + SSE fold. Suite 40 files /
+336 green (Node 24, isolated OMB_DATA_DIR), typecheck green. Evidence:
+`platform/web/screenshot-p5-memory.png` (isolated 8903 server, seeded all
+tiers/sources incl. a supersede chain + 4-item review queue; live
+`/api/memory/search` returned only the accepted, non-superseded entry).
 - New `server/memory.ts` + tests (port `MemoryEntry` model + trust-tier
   gates from `platform/server/agents/memory-gates.ts`; quarantine →
   agent_proposed → human_confirmed → org_ratified; storage `memory.json`).
