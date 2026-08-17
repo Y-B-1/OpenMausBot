@@ -379,7 +379,7 @@ solo app, zero login), users (first created OR first to log in = admin),
 scrypt set-on-first-use passwords (relay semantics: wrong password after
 set → 401), persisted restart-safe session tokens, teams CRUD-lite with
 membership on `user.teamIds`. `server/index.ts` seam: org mode OFF →
-actingUser null, nothing changes (suite untouched: 43 files / 371 green);
+actingUser null, nothing changes (suite untouched: 42 files / 365 passed, 8 skipped, 0 failed);
 ON → /api/* needs Bearer token (?token= for EventSource), open allowlist =
 login/minimal org probe/health/static. Admin gates: org users/teams/mode,
 all org-connector mutations, memory promote + team-scoping, goals/template/
