@@ -478,7 +478,35 @@ entries incl. a LIVE goal.halt "session cap" from a real $0.38 claude turn)
 - Verify: vitest — every new-module mutation produces an audit row;
   file policy denies delete.
 
-### P10 — Providers (anthropic/openai-compat drivers)
+### P10 — Providers (anthropic/openai-compat drivers) ✅ DONE
+(commits 4859a88 drivers, evidence commit follows)
+Shipped: `server/drivers/anthropic-api.ts` (driverKind `anthropicApi`) +
+`server/drivers/openai-compat.ts` (`openaiCompat`), both raw-fetch SSE
+transcript-replay drivers on the grok.ts template — NO SDK dep added,
+matching upstream's HTTP-driver practice. Anthropic: Messages API
+(`/v1/messages`, anthropic-version 2023-06-01), models Opus 5 / Sonnet 5 /
+Haiku 4.5 (default claude-opus-5), system + transcript + user pass through
+(P5 memory injection rides `turn.system` — verified in the request-shape
+test), cost = usage tokens × published prices reported on `turn.completed`
+(P8/P2 consume it); `generateText` rides haiku. OpenAI-compat: any
+chat-completions endpoint via OPENAI_COMPAT_BASE_URL + OPENAI_COMPAT_API_KEY
+(+ optional OPENAI_COMPAT_MODEL → per-instance model catalog);
+`stream_options.include_usage` for token usage; cost null (no published
+price table — grok precedent). Availability probe = env key presence
+(instance environment ?? process.env), errors → runtime.error +
+turn.completed ok:false, abort → "interrupted". Registered in
+BUILT_IN_DRIVERS + added to the DEFAULT FLEET (`anthropic`, `openaiCompat`
+instances — render unavailable-with-reason in the ModelPicker until keys
+exist); index.ts rewind special-case extended to all transcript-replay
+kinds; ProviderMark maps anthropicApi → Claude mark. Vitest: 13 mocked-fetch
+contract tests (decodeConfig, availability gating both vars, request shape
+incl. transcript order + headers, streaming event sequence, cost math
+0.00175 for 100in/50out opus-5, error path, no-key refusal). Suite 47
+files / 395 green + typecheck (Node 24, isolated OMB_DATA_DIR). Evidence:
+`platform/web/screenshot-p10-drivers.png` (isolated 8913 server, fake env
+keys — picker open on "Claude (API): ready" with the 3 models; both new
+instances in the rail). Live validation NOT run: no ANTHROPIC_API_KEY in
+env or platform/.env — awaits owner keys. Foundry/managed stay parked.
 - Port `platform/server/agents/anthropic.ts` and `openai-compat.ts` as
   upstream drivers: new `server/drivers/anthropic.ts`,
   `server/drivers/openai-compat.ts` implementing `ProviderDriver`
