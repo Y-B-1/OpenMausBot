@@ -16,6 +16,7 @@ import {
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { InboxItem, InboxQuestion } from "@/lib/inbox";
+import type { Goal, GoalInput } from "@/lib/goals";
 import { currentCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
 
@@ -204,11 +205,12 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox";
+  activeView: "chat" | "routines" | "inbox" | "goals";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
   inboxQuestions: InboxQuestion[];
+  goals: Goal[];
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
@@ -236,6 +238,13 @@ type Action =
   | { type: "inboxQuestionPatched"; question: InboxQuestion }
   | { type: "replyInboxItem"; itemId: string; reply: string }
   | { type: "answerInboxQuestion"; questionId: string; answer: string }
+  | { type: "showGoals" }
+  | { type: "goalsHydrated"; goals: Goal[] }
+  | { type: "goalPatched"; goal: Goal }
+  | { type: "createGoal"; input: GoalInput }
+  | { type: "pauseGoal"; goalId: string }
+  | { type: "resumeGoal"; goalId: string }
+  | { type: "cancelGoal"; goalId: string }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -413,6 +422,44 @@ function reducer(state: AppState, action: Action): AppState {
         inboxQuestions: state.inboxQuestions.map((q) =>
           q.id === action.questionId ? { ...q, status: "answered", answer: action.answer } : q,
         ),
+      };
+    case "showGoals":
+      return {
+        ...state,
+        activeView: "goals",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "goalsHydrated":
+      return { ...state, goals: action.goals };
+    case "goalPatched": {
+      const exists = state.goals.some((goal) => goal.id === action.goal.id);
+      return {
+        ...state,
+        goals: exists
+          ? state.goals.map((goal) => (goal.id === action.goal.id ? action.goal : goal))
+          : [action.goal, ...state.goals],
+      };
+    }
+    case "createGoal":
+      return state; // the server's goal patch adds it
+    // optimistic status flips; the server's goal patches confirm them later
+    case "pauseGoal":
+      return {
+        ...state,
+        goals: state.goals.map((goal) => (goal.id === action.goalId ? { ...goal, status: "paused" } : goal)),
+      };
+    case "resumeGoal":
+      return {
+        ...state,
+        goals: state.goals.map((goal) => (goal.id === action.goalId ? { ...goal, status: "running" } : goal)),
+      };
+    case "cancelGoal":
+      return {
+        ...state,
+        goals: state.goals.map((goal) => (goal.id === action.goalId ? { ...goal, status: "cancelled" } : goal)),
       };
     case "routinePatched": {
       const exists = state.routines.some((routine) => routine.id === action.routine.id);
@@ -741,6 +788,7 @@ const initialState: AppState = {
   routineRuns: [],
   inboxItems: [],
   inboxQuestions: [],
+  goals: [],
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
@@ -886,6 +934,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             method: "POST",
             body: JSON.stringify({ answer: action.answer }),
           }).catch(showError);
+          break;
+        case "createGoal":
+          api("/api/goals", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
+          break;
+        case "pauseGoal":
+          api(`/api/goals/${action.goalId}/pause`, { method: "POST" }).catch(showError);
+          break;
+        case "resumeGoal":
+          api(`/api/goals/${action.goalId}/resume`, { method: "POST" }).catch(showError);
+          break;
+        case "cancelGoal":
+          api(`/api/goals/${action.goalId}/cancel`, { method: "POST" }).catch(showError);
           break;
         case "send":
           api(`/api/bots/${action.botId}/messages`, {
@@ -1122,6 +1182,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/inbox")
         .then(({ items, questions }) => alive && rawDispatch({ type: "inboxHydrated", items, questions }))
         .catch(() => {});
+      api("/api/goals")
+        .then(({ goals }) => alive && rawDispatch({ type: "goalsHydrated", goals }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -1213,6 +1276,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "inbox.question":
           rawDispatch({ type: "inboxQuestionPatched", question: frame.question });
+          break;
+        case "goal":
+          rawDispatch({ type: "goalPatched", goal: frame.goal });
           break;
         case "runtime": {
           const event = frame.event;

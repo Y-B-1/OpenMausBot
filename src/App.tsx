@@ -14,6 +14,7 @@ import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { InboxPage } from "@/components/InboxPage";
+import { GoalsPage } from "@/components/GoalsPage";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
@@ -70,6 +71,8 @@ function Shell() {
         <RoutinesPage />
       ) : state.activeView === "inbox" ? (
         <InboxPage />
+      ) : state.activeView === "goals" ? (
+        <GoalsPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
