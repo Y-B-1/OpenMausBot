@@ -191,3 +191,53 @@ describe("MemoryManager", () => {
     expect(() => h.manager.add({ content: "  ", author: "y", sessionRef: "ui" })).toThrow();
   });
 });
+
+describe("team walls (P7)", () => {
+  const finance = { isAdmin: false, teamIds: ["team-fin"] };
+  const sales = { isAdmin: false, teamIds: ["team-sales"] };
+  const admin = { isAdmin: true, teamIds: [] };
+
+  function seeded() {
+    const h = harness();
+    const open = h.manager.add({ content: "org-wide handbook rule", author: "y", sessionRef: "ui" });
+    const walled = h.manager.add({
+      content: "finance budget cap secret",
+      author: "y",
+      sessionRef: "ui",
+      teamId: "team-fin",
+    });
+    return { ...h, open, walled };
+  }
+
+  it("list: team-scoped entries hidden from non-members, visible to members, admins and solo", () => {
+    const h = seeded();
+    expect(h.manager.list(sales).map((e) => e.id)).toEqual([h.open.id]);
+    expect(h.manager.list(finance)).toHaveLength(2);
+    expect(h.manager.list(admin)).toHaveLength(2);
+    expect(h.manager.list()).toHaveLength(2); // no viewer = solo mode, all visible
+    expect(h.manager.list(null)).toHaveLength(2);
+  });
+
+  it("search respects the wall", () => {
+    const h = seeded();
+    expect(h.manager.search("budget cap", 8, sales)).toHaveLength(0);
+    expect(h.manager.search("budget cap", 8, finance)).toHaveLength(1);
+    expect(h.manager.search("budget cap")).toHaveLength(1);
+  });
+
+  it("turn injection (contextBlock) respects the wall", () => {
+    const h = seeded();
+    expect(h.manager.contextBlock("what is the budget cap?", sales)).toBe("");
+    expect(h.manager.contextBlock("what is the budget cap?", finance)).toContain("finance budget cap secret");
+    expect(h.manager.contextBlock("what is the budget cap?")).toContain("finance budget cap secret");
+  });
+
+  it("setTeam scopes and un-scopes an entry", () => {
+    const h = seeded();
+    expect(h.manager.setTeam(h.open.id, "team-sales")?.teamId).toBe("team-sales");
+    expect(h.manager.list(finance).map((e) => e.id)).toEqual([h.walled.id]);
+    expect(h.manager.setTeam(h.open.id, null)?.teamId).toBeUndefined();
+    expect(h.manager.list(finance)).toHaveLength(2);
+    expect(h.manager.setTeam("nope", "t")).toBeNull();
+  });
+});

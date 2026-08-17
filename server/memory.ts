@@ -27,8 +27,23 @@ export interface MemoryEntry {
   status: MemoryStatus;
   source: MemorySource;
   supersedes?: string;
+  /** P7 team wall: set = visible only to that team's members (and admins).
+   * Unset = org-open. Enforced server-side whenever a viewer exists. */
+  teamId?: string;
   ts: number;
   updatedAt: number;
+}
+
+/** Who is looking. Null = no user context (org mode off, solo mode, or a
+ * background turn): everything is visible. Admins see everything. */
+export interface MemoryViewer {
+  isAdmin: boolean;
+  teamIds: string[];
+}
+
+export function visibleToViewer(entry: MemoryEntry, viewer: MemoryViewer | null | undefined): boolean {
+  if (!entry.teamId || !viewer) return true;
+  return viewer.isAdmin || viewer.teamIds.includes(entry.teamId);
 }
 
 export interface MemoryProposal {
@@ -39,6 +54,7 @@ export interface MemoryProposal {
   sessionRef: string;
   source?: MemorySource;
   supersedes?: string;
+  teamId?: string;
 }
 
 const SCOPES: MemoryScope[] = ["org", "space", "personal"];
@@ -114,8 +130,20 @@ export class MemoryManager {
     }
   }
 
-  list(): MemoryEntry[] {
-    return this.entries.map((entry) => ({ ...entry }));
+  list(viewer?: MemoryViewer | null): MemoryEntry[] {
+    return this.entries.filter((entry) => visibleToViewer(entry, viewer)).map((entry) => ({ ...entry }));
+  }
+
+  /** P7: scope an entry to a team (or back to org-open with null). */
+  setTeam(id: string, teamId: string | null): MemoryEntry | null {
+    const entry = this.entries.find((candidate) => candidate.id === id);
+    if (!entry) return null;
+    if (teamId) entry.teamId = teamId;
+    else delete entry.teamId;
+    entry.updatedAt = this.now();
+    this.save();
+    this.emitEntry(entry);
+    return { ...entry };
   }
 
   get(id: string): MemoryEntry | null {
@@ -190,11 +218,11 @@ export class MemoryManager {
 
   /** Entries a bot turn may see: active, accepted tiers only, case-insensitive
    * term match ranked by hit count (platform searchMemory). */
-  search(query: string, limit = 8): MemoryEntry[] {
+  search(query: string, limit = 8, viewer?: MemoryViewer | null): MemoryEntry[] {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
     return this.entries
-      .filter((m) => m.status === "active" && INJECTABLE.includes(m.trustTier))
+      .filter((m) => m.status === "active" && INJECTABLE.includes(m.trustTier) && visibleToViewer(m, viewer))
       .map((m) => {
         const text = m.content.toLowerCase();
         return { m, hits: terms.filter((t) => text.includes(t)).length };
@@ -207,8 +235,8 @@ export class MemoryManager {
 
   /** The wrapped DATA block injected into a turn's system prompt, or "" when
    * nothing relevant is accepted. */
-  contextBlock(turnText: string): string {
-    const relevant = this.search(turnText);
+  contextBlock(turnText: string, viewer?: MemoryViewer | null): string {
+    const relevant = this.search(turnText, 8, viewer);
     return relevant.length === 0 ? "" : wrapDataBlock(relevant);
   }
 
@@ -250,6 +278,7 @@ export class MemoryManager {
       updatedAt: at,
     };
     if (typeof input.supersedes === "string" && input.supersedes) entry.supersedes = input.supersedes;
+    if (typeof input.teamId === "string" && input.teamId) entry.teamId = input.teamId;
     // an already-trusted entry replaces its target immediately; a proposal
     // only does so once a human accepts it (see review()).
     if (INJECTABLE.includes(trustTier)) this.applySupersede(entry);
