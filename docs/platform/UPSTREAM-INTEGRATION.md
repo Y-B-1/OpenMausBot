@@ -519,12 +519,43 @@ env or platform/.env — awaits owner keys. Foundry/managed stay parked.
 - BLOCKED for live validation on owner's ANTHROPIC_API_KEY (tests don't
   need it).
 
-### P11 — DMs/spaces polish + export/import
-- Upstream already has DMs (`dm` groups) and rooms; port only the deltas:
-  spaces grouping of sidebar items, presence chips (client-only), and
-  `server/export.ts` porting `platform/server/yaml.ts` (`/api/export`,
-  `/api/import` claudeMd onboarding → creates a bot with description).
-- Verify: vitest — export round-trips through import.
+### P11 — Export/import + sidebar polish ✅ DONE (re-scoped)
+(commits 0cc52df server, cbecf59 UI, evidence commit follows)
+RE-SCOPE (honest): the planned "DMs/spaces polish + presence chips" is NOT
+ported — upstream already has DMs (`dm` groups), rooms and per-bot busy
+state in the sidebar; platform's spaces/presence were artifacts of its
+multi-user web client and would duplicate upstream's own thread
+organization for no user value. What P11 actually needed: the org's data
+as ONE portable bundle (platform yaml.ts's job, done upstream-style as
+JSON) + a sidebar sanity pass now 10 footer entries exist.
+Shipped: `server/org-export.ts` + `org-export.test.ts` (6 tests) —
+GET `/api/org-export` → `{version, exportedAt, inbox, goals, pipelines,
+memory, orgConnectors, org, costs, orgFiles, audit}`; POST
+`/api/org-import` (both admin/solo-gated + audited). SECRETS DECISION:
+users export WITHOUT scrypt password records (offline-crackable, and
+set-on-first-use semantics make them unnecessary — imported users simply
+set a fresh password); sessions and config.json/API keys never leave.
+IMPORT SEMANTIC: empty-managers-only (the simpler honest one — merge-by-id
+would silently pick winners for same-id conflicts); refusal names the
+non-empty sections and changes nothing. Defusals on import: running goals
+→ paused (source bots/threads don't exist here), in-flight runs →
+cancelled, connectors → disconnected, orgMode never imported. Audit chain
++ org-files index ride along EXPORT-ONLY (a hash chain is tamper-evidence
+of the exporting instance; grafting would break both — the import lands as
+a fresh `org.import` entry on the target's own chain). Managers each grew
+a small `exportState`/`importState` seam. UI: Admin → Export & Import card
+(download / restore-from-file with confirmation + plain-language secrets
+note). Polish: sidebar footer grouped WORK (Inbox, Board, Goals,
+Pipelines, Routines) / KNOWLEDGE (Memory, Connectors, Files) / ADMIN
+(Costs, Admin) with small uppercase labels; badges audited — all live, no
+stale ones; card deep-links unchanged and coherent. Suite 48 files / 401
+green + typecheck (Node 24, isolated OMB_DATA_DIR). Evidence:
+`platform/web/screenshot-p11-admin-export.png` (isolated 8915 server —
+shot AFTER a live curl export→wipe→import round trip: seeded inbox/
+question/memory/connector/template/goal/team/user, exported, restarted on
+a fresh data dir, imported {1 item, 1 question, 1 goal→paused, 1 template,
+1 memory, 1 connector, Sara+Finance}, both refusal cases exercised, target
+chain verified valid).
 
 ### P12 — E2E walkthrough
 - Port `platform/scripts/e2e-demo.mjs` to drive the UPSTREAM server API
