@@ -37,6 +37,7 @@ import { PipelineManager } from "./pipelines.ts";
 import { MemoryManager, visibleToViewer, type MemoryViewer } from "./memory.ts";
 import { OrgConnectorManager } from "./org-connectors.ts";
 import { OrgManager } from "./org.ts";
+import { CostManager } from "./costs.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -159,12 +160,17 @@ const sseClients = new Set<ServerResponse>();
 const sseViewers = new Map<ServerResponse, MemoryViewer | null>();
 function broadcast(payload: unknown) {
   const frame = `data: ${JSON.stringify(payload)}\n\n`;
+  const kind = (payload as { kind?: string })?.kind;
   const walled =
-    org.enabled && (payload as { kind?: string; entry?: { teamId?: string } })?.kind === "memory"
+    org.enabled && kind === "memory"
       ? (payload as { entry: Parameters<typeof visibleToViewer>[0] }).entry
       : null;
+  // P8: spend is admin-only in org mode — cost frames must not leak to
+  // members through the shared stream (mirrors the memory team walls).
+  const adminOnly = org.enabled && kind === "cost";
   for (const res of [...sseClients]) {
     if (walled?.teamId && !visibleToViewer(walled, sseViewers.get(res))) continue;
+    if (adminOnly && sseViewers.get(res)?.isAdmin === false) continue;
     try {
       res.write(frame);
     } catch {
@@ -201,6 +207,20 @@ const memory = new MemoryManager({
 // Org connectors (P6): registry of organizational sources with mock sync
 // into shared memory. Distinct from /api/connectors (Composio).
 const orgConnectors = new OrgConnectorManager({ memory, emit: broadcast });
+// Cost ledger (P8): a bus tee turning every provider-reported turn cost into
+// a persistent entry, attributed to the engine that owns the thread. It must
+// classify BEFORE the engines fold the same turn.completed (they clear their
+// in-flight thread maps on it), hence its slot at the top of the subscriber.
+const costs = new CostManager({
+  emit: broadcast,
+  botFor: (threadId) => store.botByThread(threadId)?.id ?? null,
+  classify: (threadId) => {
+    if (routines?.isActiveThread(threadId)) return "routine";
+    if (goals?.list().some((goal) => goal.threadId === threadId)) return "goal";
+    if (pipelines?.listRuns().some((run) => run.threadId === threadId)) return "pipeline";
+    return "chat";
+  },
+});
 // The Local VM is intentionally one shared, visible desktop. Two agents
 // driving it simultaneously would mix clicks, keystrokes and screenshots,
 // so only one thread may lease it at a time.
@@ -209,6 +229,7 @@ let localVmLifecycleBusy = false;
 
 bus.subscribe((event: RuntimeEvent) => {
   broadcast({ kind: "runtime", event });
+  costs.handleRuntimeEvent(event); // tee first — engines clear in-flight state below
   routines?.handleRuntimeEvent(event);
   goals?.handleRuntimeEvent(event);
   pipelines?.handleRuntimeEvent(event);
@@ -1369,6 +1390,13 @@ const server = createServer(async (req, res) => {
             ? goals!.resume(goalMatch[1])
             : await goals!.cancel(goalMatch[1]);
       return goal ? json(res, 200, { goal }) : json(res, 404, { error: "no such goal in that state" });
+    }
+
+    // ── costs: ledger of provider-reported per-turn spend (P8) ───────────
+    if (path === "/api/costs" && method === "GET") {
+      // P7 judgment carried over: org-wide spend is admin-only in org mode.
+      if (adminGate()) return;
+      return json(res, 200, { summary: costs.summary() });
     }
 
     // ── pipelines: templated step runs with approval gates ───────────────
