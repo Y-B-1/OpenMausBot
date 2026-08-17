@@ -35,6 +35,7 @@ import { InboxManager } from "./inbox.ts";
 import { GoalManager } from "./goals.ts";
 import { PipelineManager } from "./pipelines.ts";
 import { MemoryManager } from "./memory.ts";
+import { OrgConnectorManager } from "./org-connectors.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -180,6 +181,9 @@ const memory = new MemoryManager({
   emit: broadcast,
   authorFor: (threadId) => store.botByThread(threadId)?.name ?? null,
 });
+// Org connectors (P6): registry of organizational sources with mock sync
+// into shared memory. Distinct from /api/connectors (Composio).
+const orgConnectors = new OrgConnectorManager({ memory, emit: broadcast });
 // The Local VM is intentionally one shared, visible desktop. Two agents
 // driving it simultaneously would mix clicks, keystrokes and screenshots,
 // so only one thread may lease it at a time.
@@ -1297,6 +1301,49 @@ const server = createServer(async (req, res) => {
               ? memory.review(memoryMatch[1], memoryMatch[2])
               : null;
       return entry ? json(res, 200, { entry }) : json(res, 404, { error: "no such entry in that state" });
+    }
+
+    // ── org connectors: registry + mock sync into shared memory (P6) ─────
+    if (path === "/api/org-connectors/catalog" && method === "GET") {
+      return json(res, 200, { catalog: orgConnectors.catalog() });
+    }
+    if (path === "/api/org-connectors" && method === "GET") {
+      return json(res, 200, { connectors: orgConnectors.list() });
+    }
+    if (path === "/api/org-connectors" && method === "POST") {
+      try {
+        return json(res, 201, { connector: orgConnectors.add(await readBody(req)) });
+      } catch (err) {
+        return json(res, 400, { error: String((err as Error).message ?? err) });
+      }
+    }
+    const orgConnMatch = path.match(/^\/api\/org-connectors\/([\w-]+)(?:\/(connect|disconnect|sync|tools))?$/);
+    if (orgConnMatch && (method === "POST" || method === "PATCH" || method === "DELETE")) {
+      const id = orgConnMatch[1]!;
+      if (method === "DELETE") {
+        const removed = orgConnectors.remove(id);
+        return removed ? json(res, 200, { connector: removed }) : json(res, 404, { error: "no such connector" });
+      }
+      if (method === "PATCH" && !orgConnMatch[2]) {
+        const connector = orgConnectors.configure(id, await readBody(req));
+        return connector ? json(res, 200, { connector }) : json(res, 404, { error: "no such connector" });
+      }
+      if (method === "POST" && orgConnMatch[2] === "tools") {
+        const body = await readBody(req);
+        const connector = orgConnectors.setTool(id, String(body.name ?? ""), Boolean(body.enabled));
+        return connector ? json(res, 200, { connector }) : json(res, 404, { error: "no such connector or tool" });
+      }
+      if (method === "POST" && orgConnMatch[2] === "sync") {
+        const result = orgConnectors.sync(id);
+        return result
+          ? json(res, 200, result)
+          : json(res, 409, { error: "sync needs a connected memory-kind connector" });
+      }
+      if (method === "POST" && (orgConnMatch[2] === "connect" || orgConnMatch[2] === "disconnect")) {
+        const connector =
+          orgConnMatch[2] === "connect" ? orgConnectors.connect(id) : orgConnectors.disconnect(id);
+        return connector ? json(res, 200, { connector }) : json(res, 404, { error: "no such connector" });
+      }
     }
 
     // ── events stream ──

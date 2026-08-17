@@ -134,6 +134,22 @@ export class MemoryManager {
     return this.insert(input, "human_confirmed", "human");
   }
 
+  /** Connector-sync write path (P6): systems of record are trusted as-is —
+   * entries land org_ratified (review is for what AGENTS claim to know).
+   * Idempotent by provenance author + content: re-sync never duplicates. */
+  ingestConnector(input: MemoryProposal): { entry: MemoryEntry; created: boolean } {
+    const content = String(input.content ?? "").trim().slice(0, MAX_CONTENT);
+    const existing = this.entries.find(
+      (candidate) =>
+        candidate.source === "connector" &&
+        candidate.status === "active" &&
+        candidate.provenance.author === String(input.author ?? "") &&
+        candidate.content === content,
+    );
+    if (existing) return { entry: { ...existing }, created: false };
+    return { entry: this.insert(input, "org_ratified", "connector"), created: true };
+  }
+
   /** Review queue: accept → human_confirmed (supersede applied), reject → retired. */
   review(id: string, verdict: "accept" | "reject"): MemoryEntry | null {
     const entry = this.entries.find((candidate) => candidate.id === id);
