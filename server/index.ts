@@ -33,6 +33,7 @@ import { readCuaConnection } from "./local-computer.ts";
 import { RoutineManager, type RoutineRunOn } from "./routines.ts";
 import { InboxManager } from "./inbox.ts";
 import { GoalManager } from "./goals.ts";
+import { PipelineManager } from "./pipelines.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -168,6 +169,7 @@ const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> 
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
 let routines: RoutineManager | null = null;
 let goals: GoalManager | null = null;
+let pipelines: PipelineManager | null = null;
 // Cross-bot inbox: agent-posted items + blocking questions, mirrored from
 // live provider asks so nothing waits unseen behind an unselected bot.
 const inbox = new InboxManager({ emit: broadcast });
@@ -181,6 +183,7 @@ bus.subscribe((event: RuntimeEvent) => {
   broadcast({ kind: "runtime", event });
   routines?.handleRuntimeEvent(event);
   goals?.handleRuntimeEvent(event);
+  pipelines?.handleRuntimeEvent(event);
   const bot = store.botByThread(event.threadId);
   const group = bot ? undefined : store.groupByThread(event.threadId);
   if (!bot && !group) return;
@@ -751,6 +754,45 @@ goals = new GoalManager({
 });
 goals.start();
 
+// ── pipelines: templated multi-step runs with human approval gates ─────
+// Each step is one bot turn in its own detached task; a gated step suspends
+// the run on a token-addressed expiring approval mirrored into the Inbox.
+// Runs start only via the API — runtime events can never trigger a run.
+pipelines = new PipelineManager({
+  emit: broadcast,
+  botState: (botId) => {
+    const bot = store.bot(botId);
+    return !bot ? "missing" : bot.busy ? "busy" : "ready";
+  },
+  createTask: (botId, title) => {
+    const task = store.createTask(botId, title, false);
+    const bot = store.bot(botId);
+    if (task && bot) broadcast({ kind: "bot", bot: publicBot(bot) });
+    return task;
+  },
+  startTurn: (botId, threadId, prompt, onDispatchError) =>
+    startTurn(botId, prompt, { threadId, onDispatchError }),
+  interruptTurn: async (botId, threadId) => {
+    const bot = store.bot(botId);
+    const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
+    await instance?.adapter.interruptTurn(threadId);
+  },
+  // The synthetic thread/request pair makes the mirrored question resolvable
+  // from the Inbox answer route exactly like a live provider ask.
+  onGate: (run, step, token) =>
+    inbox.askQuestion({
+      botId: step.botId,
+      prompt: `Pipeline "${run.name}" is waiting for approval before step ${run.stepIndex + 1}: ${step.title}`,
+      options: ["Approve", "Reject"],
+      threadId: `pipeline:${run.id}`,
+      requestId: token,
+    }),
+  onGateResolved: (run, token, behavior) => {
+    inbox.resolveAsk(`pipeline:${run.id}`, token, behavior);
+  },
+});
+pipelines.start();
+
 // ── config hot-reload ─────────────────────────────────────────────────
 // ── group turn engine ──────────────────────────────────────────────────
 // Room messages go to the configured default responder unless the user
@@ -1141,6 +1183,16 @@ const server = createServer(async (req, res) => {
       const pending = inbox.question(inboxMatch[1]);
       if (!pending) return json(res, 404, { error: "no such question" });
       if (pending.status === "answered") return json(res, 409, { error: "already answered" });
+      if (pending.threadId?.startsWith("pipeline:") && pending.requestId) {
+        // Mirrored pipeline gate: the answer text decides the gate; the
+        // manager's onGateResolved settles this question for every client.
+        const runId = pending.threadId.slice("pipeline:".length);
+        const run = /^\s*approve/i.test(answer)
+          ? pipelines!.approve(runId, pending.requestId)
+          : pipelines!.reject(runId, pending.requestId);
+        if (!run) return json(res, 409, { error: "that gate is no longer pending" });
+        return json(res, 200, { question: inbox.question(pending.id) });
+      }
       if (pending.threadId && pending.requestId) {
         // Mirrored live ask: unblock the waiting provider first; its
         // request.resolved event settles the mirrored row for every client.
@@ -1177,6 +1229,31 @@ const server = createServer(async (req, res) => {
             ? goals!.resume(goalMatch[1])
             : await goals!.cancel(goalMatch[1]);
       return goal ? json(res, 200, { goal }) : json(res, 404, { error: "no such goal in that state" });
+    }
+
+    // ── pipelines: templated step runs with approval gates ───────────────
+    if (path === "/api/templates" && method === "GET") {
+      return json(res, 200, { templates: pipelines!.listTemplates() });
+    }
+    if (path === "/api/templates" && method === "POST") {
+      return json(res, 201, { template: pipelines!.createTemplate(await readBody(req)) });
+    }
+    if (path === "/api/pipelines" && method === "GET") {
+      return json(res, 200, { templates: pipelines!.listTemplates(), runs: pipelines!.listRuns() });
+    }
+    if (path === "/api/pipelines" && method === "POST") {
+      return json(res, 201, { run: pipelines!.startRun(await readBody(req)) });
+    }
+    const pipelineMatch = path.match(/^\/api\/pipelines\/([\w-]+)\/(approve|reject|cancel)$/);
+    if (pipelineMatch && method === "POST") {
+      const body = await readBody(req);
+      const run =
+        pipelineMatch[2] === "cancel"
+          ? await pipelines!.cancel(pipelineMatch[1])
+          : pipelineMatch[2] === "approve"
+            ? pipelines!.approve(pipelineMatch[1], String(body.token ?? ""))
+            : pipelines!.reject(pipelineMatch[1], String(body.token ?? ""));
+      return run ? json(res, 200, { run }) : json(res, 404, { error: "no such run in that state" });
     }
 
     // ── events stream ──
