@@ -268,7 +268,30 @@ REAL claude session, so a live busy-task card appears in In progress).
 - Verify: component-level vitest (column derivation function extracted to
   `src/lib/board.ts` and unit-tested) + suite green.
 
-### P4 — Pipelines with approval gates
+### P4 — Pipelines with approval gates ✅ DONE
+(commits: server + UI + this evidence commit)
+Shipped: `server/pipelines.ts` + `pipelines.test.ts` (13 tests) —
+`PipelineManager` (GoalManager pattern, `pipelines.json`): templates
+(steps: title/prompt/botId/`gate:"approval"`), runs execute steps
+sequentially as bot turns in per-step detached tasks, each step's last
+assistant reply fed into the next step's prompt. A gated step suspends the
+run BEFORE it executes: status `waiting_approval` + token-addressed expiring
+approval (buzz `workflow_approvals` shape, 60m TTL, tick sweeps expiry →
+rejected) mirrored into the P1 inbox with a synthetic
+`threadId "pipeline:<runId>"` / `requestId <token>` pair, so answering the
+inbox question forwards to approve/reject exactly like a live provider ask.
+Reject/expiry cancel remaining steps; cancel interrupts the in-flight turn;
+restart-safe (mid-turn step reruns, pending gates survive). No-retrigger
+rule enforced: runtime events only ever advance in-flight steps, never
+start runs (tested). Routes: GET/POST `/api/templates`, GET/POST
+`/api/pipelines`, POST `/api/pipelines/:id/(approve|reject|cancel)`; SSE
+`pipeline.template`/`pipeline.run`. UI: `PipelinesPage.tsx` two-pane
+(templates + runs, step progress, inline gate Approve/Reject), activeView
+`"pipelines"`, Sidebar entry with waiting-count badge, store slice + SSE
+folds; board maps pipeline runs (waiting_approval → Waiting on human,
+`board.test.ts` extended). Suite 39 files / 325 green (Node 24), typecheck
+green. Evidence: `platform/web/screenshot-p4-pipelines.png` (isolated 8901
+server, seeded run suspended at a gate; inbox-answer Reject verified live).
 - New `server/pipelines.ts` + tests (port `TemplateRecord`/`PipelineRun`
   step machine + gate from relay.ts; steps execute as bot turns; gate
   raises an upstream approval card in the owning chat AND an inbox item).
