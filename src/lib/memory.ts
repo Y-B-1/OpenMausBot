@@ -16,6 +16,8 @@ export interface MemoryEntry {
   status: MemoryStatus;
   source: MemorySource;
   supersedes?: string;
+  /** P7 team wall: set = only that team's members (and admins) see it. */
+  teamId?: string;
   ts: number;
   updatedAt: number;
 }

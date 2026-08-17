@@ -19,6 +19,7 @@ import type { InboxItem, InboxQuestion } from "@/lib/inbox";
 import type { Goal, GoalInput } from "@/lib/goals";
 import type { MemoryAddInput, MemoryEntry } from "@/lib/memory";
 import type { OrgConnector, OrgConnectorInput, OrgProviderInfo } from "@/lib/org-connectors";
+import { orgToken, setOrgToken, type OrgRole, type OrgState, type OrgUser } from "@/lib/org";
 import type { PipelineRun, PipelineTemplate, TemplateInput } from "@/lib/pipelines";
 import { currentCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
@@ -208,7 +209,7 @@ interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors";
+  activeView: "chat" | "routines" | "inbox" | "goals" | "board" | "pipelines" | "memory" | "connectors" | "admin";
   routines: Routine[];
   routineRuns: RoutineRun[];
   inboxItems: InboxItem[];
@@ -219,6 +220,10 @@ interface AppState {
   memoryEntries: MemoryEntry[];
   orgConnectors: OrgConnector[];
   orgConnectorCatalog: OrgProviderInfo[];
+  /** P7 org mode. Null until /api/org answers; solo mode = {orgMode:false}. */
+  org: OrgState | null;
+  /** Who is logged in (org mode only; null in solo mode). */
+  orgMe: OrgUser | null;
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
@@ -270,6 +275,18 @@ type Action =
   | { type: "reviewMemory"; entryId: string; verdict: "accept" | "reject" }
   | { type: "promoteMemory"; entryId: string }
   | { type: "retireMemory"; entryId: string }
+  | { type: "showAdmin" }
+  | { type: "orgHydrated"; org: OrgState; me: OrgUser | null }
+  | { type: "orgPatched"; org: OrgState }
+  | { type: "loginOrg"; name: string; password: string }
+  | { type: "logoutOrg" }
+  | { type: "setOrgMode"; enabled: boolean; name?: string; password?: string }
+  | { type: "addOrgUser"; name: string; role?: OrgRole }
+  | { type: "setOrgRole"; userId: string; role: OrgRole }
+  | { type: "setOrgUserTeams"; userId: string; teamIds: string[] }
+  | { type: "addOrgTeam"; name: string }
+  | { type: "removeOrgTeam"; teamId: string }
+  | { type: "setMemoryTeam"; entryId: string; teamId: string | null }
   | { type: "showConnectors" }
   | { type: "orgConnectorsHydrated"; connectors: OrgConnector[] }
   | { type: "orgConnectorCatalogHydrated"; catalog: OrgProviderInfo[] }
@@ -532,6 +549,30 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         memoryEntries: state.memoryEntries.map((entry) =>
           entry.id === action.entryId ? { ...entry, status: "retired" } : entry,
+        ),
+      };
+    case "showAdmin":
+      return {
+        ...state,
+        activeView: "admin",
+        settingsOpen: false,
+        computerOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "orgHydrated":
+      return { ...state, org: action.org, orgMe: action.me };
+    case "orgPatched":
+      return {
+        ...state,
+        org: action.org,
+        orgMe: state.orgMe ? (action.org.users.find((u) => u.id === state.orgMe!.id) ?? state.orgMe) : null,
+      };
+    case "setMemoryTeam":
+      return {
+        ...state,
+        memoryEntries: state.memoryEntries.map((entry) =>
+          entry.id === action.entryId ? { ...entry, teamId: action.teamId ?? undefined } : entry,
         ),
       };
     case "showConnectors":
@@ -941,6 +982,14 @@ function reducer(state: AppState, action: Action): AppState {
     case "runRoutine":
     case "cancelRoutineRun":
     case "markRoutineRunSeen":
+    case "loginOrg":
+    case "logoutOrg":
+    case "setOrgMode":
+    case "addOrgUser":
+    case "setOrgRole":
+    case "setOrgUserTeams":
+    case "addOrgTeam":
+    case "removeOrgTeam":
       return state;
   }
 }
@@ -965,6 +1014,8 @@ const initialState: AppState = {
   memoryEntries: [],
   orgConnectors: [],
   orgConnectorCatalog: [],
+  org: null,
+  orgMe: null,
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
@@ -978,10 +1029,16 @@ const initialState: AppState = {
 };
 
 // ── API client ─────────────────────────────────────────────────────────
+/** Auth headers for every request — empty in solo mode (no token saved). */
+export function authHeaders(): Record<string, string> {
+  const token = orgToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
 export async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: { "content-type": "application/json", ...authHeaders(), ...init?.headers },
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
@@ -1070,7 +1127,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>) => {
       fetch(`/api/bots/${botId}/cards/${messageId}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeaders() },
         body: JSON.stringify(patch),
       }).catch(() => {});
     };
@@ -1134,6 +1191,73 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "retireMemory":
           api(`/api/memory/${action.entryId}`, { method: "DELETE" }).catch(showError);
+          break;
+        // org mode (P7): login/enable answer with a session token; storing it
+        // and reloading is the simplest correct move — the SSE stream itself
+        // must reconnect with the token, and a reload re-hydrates everything
+        // through the now-authenticated api() in one step.
+        case "loginOrg":
+          api("/api/login", {
+            method: "POST",
+            body: JSON.stringify({ name: action.name, password: action.password }),
+          })
+            .then(({ token }) => {
+              setOrgToken(token);
+              window.location.reload();
+            })
+            .catch(showError);
+          break;
+        case "logoutOrg":
+          api("/api/logout", { method: "POST" })
+            .catch(() => {})
+            .then(() => {
+              setOrgToken(null);
+              window.location.reload();
+            });
+          break;
+        case "setOrgMode":
+          api("/api/org/mode", {
+            method: "POST",
+            body: JSON.stringify({ enabled: action.enabled, name: action.name, password: action.password }),
+          })
+            .then((r) => {
+              if (action.enabled && r.token) setOrgToken(r.token);
+              if (!action.enabled) setOrgToken(null);
+              window.location.reload();
+            })
+            .catch(showError);
+          break;
+        case "addOrgUser":
+          api("/api/org/users", {
+            method: "POST",
+            body: JSON.stringify({ name: action.name, role: action.role }),
+          }).catch(showError);
+          break;
+        case "setOrgRole":
+          api(`/api/org/users/${action.userId}/role`, {
+            method: "POST",
+            body: JSON.stringify({ role: action.role }),
+          }).catch(showError);
+          break;
+        case "setOrgUserTeams":
+          api(`/api/org/users/${action.userId}/teams`, {
+            method: "POST",
+            body: JSON.stringify({ teamIds: action.teamIds }),
+          }).catch(showError);
+          break;
+        case "addOrgTeam":
+          api("/api/org/teams", { method: "POST", body: JSON.stringify({ name: action.name }) }).catch(
+            showError,
+          );
+          break;
+        case "removeOrgTeam":
+          api(`/api/org/teams/${action.teamId}`, { method: "DELETE" }).catch(showError);
+          break;
+        case "setMemoryTeam":
+          api(`/api/memory/${action.entryId}/team`, {
+            method: "POST",
+            body: JSON.stringify({ teamId: action.teamId }),
+          }).catch(showError);
           break;
         case "addOrgConnector":
           api("/api/org-connectors", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
@@ -1430,10 +1554,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/org-connectors/catalog")
         .then(({ catalog }) => alive && rawDispatch({ type: "orgConnectorCatalogHydrated", catalog }))
         .catch(() => {});
+      api("/api/org")
+        .then((r) => {
+          if (!alive) return;
+          rawDispatch({ type: "orgHydrated", org: { orgMode: r.orgMode, users: r.users ?? [], teams: r.teams ?? [] }, me: r.me ?? null });
+          // a stale token (server reset, session revoked) must not linger —
+          // it would keep the app half-authenticated forever
+          if (r.orgMode && orgToken() && !r.me) setOrgToken(null);
+        })
+        .catch(() => {});
     };
     loadAll();
 
-    const es = new EventSource("/api/events");
+    // EventSource cannot set headers, so the session token rides the URL.
+    const esToken = orgToken();
+    const es = new EventSource(esToken ? `/api/events?token=${esToken}` : "/api/events");
     es.onopen = () => {
       rawDispatch({ type: "connected", value: true });
       loadAll(); // resync anything missed while disconnected
@@ -1483,7 +1618,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             bot.unread = false;
             fetch(`/api/bots/${bot.id}`, {
               method: "PATCH",
-              headers: { "content-type": "application/json" },
+              headers: { "content-type": "application/json", ...authHeaders() },
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
@@ -1497,7 +1632,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             group.unread = false;
             fetch(`/api/groups/${group.id}`, {
               method: "PATCH",
-              headers: { "content-type": "application/json" },
+              headers: { "content-type": "application/json", ...authHeaders() },
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
@@ -1533,6 +1668,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "memory":
           rawDispatch({ type: "memoryPatched", entry: frame.entry });
+          break;
+        case "org":
+          rawDispatch({ type: "orgPatched", org: frame.state });
           break;
         case "org_connector":
           rawDispatch({ type: "orgConnectorPatched", connector: frame.connector });

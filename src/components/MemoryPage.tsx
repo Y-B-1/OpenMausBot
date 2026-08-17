@@ -55,6 +55,38 @@ function Provenance({ entry }: { entry: MemoryEntry }) {
   );
 }
 
+/** P7: which departments see this entry. Admin-only control, org mode only —
+ * empty = the whole org; a team = only that team's members (and admins). */
+function TeamScopeSelect({ entry }: { entry: MemoryEntry }) {
+  const { state, dispatch } = useStore();
+  if (!state.org?.orgMode) return null;
+  const teams = state.org.teams;
+  const isAdmin = state.orgMe?.role === "admin";
+  const teamName = teams.find((t) => t.id === entry.teamId)?.name;
+  if (!isAdmin) {
+    return entry.teamId ? (
+      <span className="rounded-full bg-raised px-2 py-0.5 text-[11px] text-ink-secondary">
+        {teamName ?? "team-only"}
+      </span>
+    ) : null;
+  }
+  return (
+    <select
+      value={entry.teamId ?? ""}
+      onChange={(e) => dispatch({ type: "setMemoryTeam", entryId: entry.id, teamId: e.target.value || null })}
+      title="Which department sees this entry"
+      className="rounded-lg border border-hairline/60 bg-inset px-1.5 py-0.5 text-[11px] text-ink-secondary outline-none"
+    >
+      <option value="">Whole org</option>
+      {teams.map((t) => (
+        <option key={t.id} value={t.id}>
+          Only {t.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function EntryCard({ entry }: { entry: MemoryEntry }) {
   const { dispatch } = useStore();
   return (
@@ -80,6 +112,7 @@ function EntryCard({ entry }: { entry: MemoryEntry }) {
         {entry.status === "superseded" && <span className="text-[11px] text-ink-secondary/60">superseded</span>}
         {entry.status === "retired" && <span className="text-[11px] text-ink-secondary/60">retired</span>}
         <span className="ml-auto flex items-center gap-1">
+          {entry.status === "active" && <TeamScopeSelect entry={entry} />}
           {entry.status === "active" && entry.trustTier === "human_confirmed" && (
             <button
               onClick={() => dispatch({ type: "promoteMemory", entryId: entry.id })}

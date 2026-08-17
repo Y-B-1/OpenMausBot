@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  ShieldCheck,
   Puzzle,
   Trash2,
   Users,
@@ -724,6 +725,21 @@ export function Sidebar() {
               </span>
             ) : null;
           })()}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "showAdmin" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "admin" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <ShieldCheck size={20} className={state.activeView === "admin" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Admin</span>
+          {state.org?.orgMode && (
+            <span className="rounded-full bg-raised px-1.5 py-0.5 text-[11px] font-semibold text-ink-secondary">
+              org
+            </span>
+          )}
         </button>
         <button
           onClick={() => dispatch({ type: "showRoutines" })}

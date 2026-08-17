@@ -19,10 +19,17 @@ import { BoardPage } from "@/components/BoardPage";
 import { PipelinesPage } from "@/components/PipelinesPage";
 import { MemoryPage } from "@/components/MemoryPage";
 import { OrgConnectorsPage } from "@/components/OrgConnectorsPage";
+import { AdminPage } from "@/components/AdminPage";
+import { LoginGate } from "@/components/LoginGate";
+import { orgToken } from "@/lib/org";
 import { NoEngines } from "@/components/NoEngines";
 
 function Shell() {
   const { state, dispatch } = useStore();
+  // P7 org mode: with auth on and no session, everything waits behind the
+  // login gate. Solo mode (org.orgMode false / unknown) never sees it.
+  // (Checked after the hooks below — hooks must run unconditionally.)
+  const needsLogin = Boolean(state.org?.orgMode) && !state.orgMe && !orgToken();
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
 
@@ -65,6 +72,8 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.bots, state.selectedId, dispatch]);
 
+  if (needsLogin) return <LoginGate />;
+
   return (
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
@@ -85,6 +94,8 @@ function Shell() {
         <MemoryPage />
       ) : state.activeView === "connectors" ? (
         <OrgConnectorsPage />
+      ) : state.activeView === "admin" ? (
+        <AdminPage />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
