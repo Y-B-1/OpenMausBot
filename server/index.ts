@@ -34,6 +34,7 @@ import { RoutineManager, type RoutineRunOn } from "./routines.ts";
 import { InboxManager } from "./inbox.ts";
 import { GoalManager } from "./goals.ts";
 import { PipelineManager } from "./pipelines.ts";
+import { MemoryManager } from "./memory.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -173,6 +174,12 @@ let pipelines: PipelineManager | null = null;
 // Cross-bot inbox: agent-posted items + blocking questions, mirrored from
 // live provider asks so nothing waits unseen behind an unselected bot.
 const inbox = new InboxManager({ emit: broadcast });
+// Tiered shared memory: agent REMEMBER-line proposals wait in a human review
+// queue; only human_confirmed/org_ratified entries reach a prompt, as DATA.
+const memory = new MemoryManager({
+  emit: broadcast,
+  authorFor: (threadId) => store.botByThread(threadId)?.name ?? null,
+});
 // The Local VM is intentionally one shared, visible desktop. Two agents
 // driving it simultaneously would mix clicks, keystrokes and screenshots,
 // so only one thread may lease it at a time.
@@ -184,6 +191,7 @@ bus.subscribe((event: RuntimeEvent) => {
   routines?.handleRuntimeEvent(event);
   goals?.handleRuntimeEvent(event);
   pipelines?.handleRuntimeEvent(event);
+  memory.handleRuntimeEvent(event);
   const bot = store.botByThread(event.threadId);
   const group = bot ? undefined : store.groupByThread(event.threadId);
   if (!bot && !group) return;
@@ -537,6 +545,10 @@ async function startTurn(
     .filter(Boolean)
     .join(" ");
 
+  // Accepted shared memory relevant to this turn rides along as wrapped
+  // reference DATA (never instructions); proposals never inject.
+  const memoryBlock = memory.contextBlock(text);
+
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
@@ -677,7 +689,9 @@ async function startTurn(
             ? ` The user tagged ${tagged
                 .map((t) => `@${t.name} (ask_bot bot_id ${t.id})`)
                 .join(" and ")} in their message — bring them in with ask_bot and fold their reply into your answer.`
-            : ""),
+            : "") +
+          (memoryBlock ? `\n\n${memoryBlock}` : "") +
+          "\n\nTo save something durable for the whole workspace, end a reply line with the form REMEMBER: <one-line note> (or REMEMBER(kind): where kind is fact, preference, procedure, episode, glossary or lesson). Saved notes wait for human review before anyone relies on them.",
         integrations,
       });
       // dispatched: the rewind is spent, and the old cursors are dead
@@ -1254,6 +1268,35 @@ const server = createServer(async (req, res) => {
             ? pipelines!.approve(pipelineMatch[1], String(body.token ?? ""))
             : pipelines!.reject(pipelineMatch[1], String(body.token ?? ""));
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such run in that state" });
+    }
+
+    // ── memory: tiered shared memory with a human review queue ───────────
+    if (path === "/api/memory" && method === "GET") {
+      return json(res, 200, { entries: memory.list() });
+    }
+    if (path === "/api/memory/search" && method === "GET") {
+      return json(res, 200, { entries: memory.search(url.searchParams.get("q") ?? "") });
+    }
+    if (path === "/api/memory/propose" && method === "POST") {
+      return json(res, 201, { entry: memory.propose(await readBody(req)) });
+    }
+    if (path === "/api/memory" && method === "POST") {
+      const body = await readBody(req);
+      return json(res, 201, {
+        entry: memory.add({ ...body, author: String(body.author ?? "you"), sessionRef: "ui" }),
+      });
+    }
+    const memoryMatch = path.match(/^\/api\/memory\/([\w-]+)(?:\/(accept|reject|promote))?$/);
+    if (memoryMatch && (method === "POST" || method === "DELETE")) {
+      const entry =
+        method === "DELETE"
+          ? memory.retire(memoryMatch[1])
+          : memoryMatch[2] === "promote"
+            ? memory.promote(memoryMatch[1])
+            : memoryMatch[2] === "accept" || memoryMatch[2] === "reject"
+              ? memory.review(memoryMatch[1], memoryMatch[2])
+              : null;
+      return entry ? json(res, 200, { entry }) : json(res, 404, { error: "no such entry in that state" });
     }
 
     // ── events stream ──
