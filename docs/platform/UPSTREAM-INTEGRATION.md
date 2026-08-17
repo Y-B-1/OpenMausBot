@@ -220,7 +220,24 @@ seeded via curl).
 - Verify: new vitest (post → appears; blocking question → answer resolves
   turn via fake driver) + full `pnpm test` green.
 
-### P2 — Goals with guardrails
+### P2 — Goals with guardrails ✅ DONE
+(commits c3c4b78 server, 1269f60 UI, screenshot+tick commit follows)
+Shipped: `server/goals.ts` + `goals.test.ts` (12 tests) — `GoalManager`
+(RoutineManager pattern, `goals.json`, atomic writes): one detached task per
+goal, one bot turn per session via the existing `startTurn`, criterion checked
+off on a self-reported DONE line, guardrails enforced between sessions
+(session cap, spend cap from the provider-reported `turn.completed` cost —
+upstream DOES track per-turn cost, so spend is real, not a proxy — wall clock,
+stuck detection); pause/resume/cancel (cancel interrupts the in-flight turn).
+Routes GET/POST `/api/goals`, POST `/api/goals/:id/(pause|resume|cancel)`;
+SSE `{kind:"goal"}`. Blocking questions raised mid-goal flow through the P1
+inbox mirror with zero extra wiring. UI: `GoalsPage.tsx` two-pane (InboxPage
+conventions), criteria checklist + guardrail meters + new-goal form; store
+slice + SSE fold; Sidebar Goals button with running-count badge. Suite 37
+files / 306 green, typecheck green. Evidence:
+`platform/web/screenshot-p2-goals.png` — isolated server on 8899, LIVE claude
+sessions actually ran ($0.28 real tracked spend) and the stuck guardrail
+halted the loop at 3/3.
 - New `server/goals.ts` + tests (port goal loop + `GoalGuardrails`
   spend/session/wall-clock/stuck halts from relay.ts; sessions run as bot
   turns through the existing registry/bus; storage `goals.json`).
